@@ -149,7 +149,7 @@ export class ArticlesService {
   }
 
   async create(dto: CreateArticleDto) {
-    const slug = await this.generateSlug(dto.title)
+    const slug = await this.generateSlug(dto.slug || dto.title)
     return this.prisma.article.create({
       data: {
         type: dto.type,
@@ -159,6 +159,9 @@ export class ArticlesService {
         featuredImage: dto.featuredImage,
         authorName: dto.authorName ?? 'Reporte Médico',
         slug,
+        status: dto.status ?? ArticleStatus.DRAFT,
+        relevance: dto.relevance ?? 3,
+        ...(dto.publishedAt && { publishedAt: new Date(dto.publishedAt) }),
         tags: dto.tagIds?.length
           ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
           : undefined,
@@ -167,7 +170,7 @@ export class ArticlesService {
   }
 
   async update(id: string, dto: UpdateArticleDto) {
-    const { tagIds, ...fields } = dto
+    const { tagIds, slug: _slug, ...fields } = dto
     return this.prisma.article.update({
       where: { id },
       data: {
@@ -176,6 +179,9 @@ export class ArticlesService {
         content: fields.content,
         featuredImage: fields.featuredImage,
         authorName: fields.authorName,
+        ...(fields.status !== undefined && { status: fields.status }),
+        ...(fields.relevance !== undefined && { relevance: fields.relevance }),
+        ...(fields.publishedAt !== undefined && { publishedAt: new Date(fields.publishedAt) }),
         ...(tagIds !== undefined && {
           tags: {
             deleteMany: {},
@@ -221,6 +227,7 @@ export class ArticlesService {
         title: dto.title,
         excerpt: dto.excerpt,
         content: dto.content,
+        featuredImage: dto.featuredImage,
         authorName: dto.authorName,
         slug,
         type: ArticleType.MEDICAL_ARTICLE,

@@ -48,6 +48,10 @@ export class SubmitPublicDto {
   authorName!: string
 
   @IsOptional()
+  @IsString()
+  featuredImage?: string
+
+  @IsOptional()
   @IsArray()
   @IsUUID(undefined, { each: true })
   tagIds?: string[]
