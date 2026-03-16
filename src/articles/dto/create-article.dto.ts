@@ -1,5 +1,5 @@
-import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength } from 'class-validator'
-import { ArticleType } from '@prisma/client'
+import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, IsInt, Min, Max, IsDateString } from 'class-validator'
+import { ArticleType, ArticleStatus } from '@prisma/client'
 
 export class CreateArticleDto {
   @IsEnum(ArticleType)
@@ -9,6 +9,11 @@ export class CreateArticleDto {
   @MinLength(1)
   @MaxLength(300)
   title!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  slug?: string
 
   @IsOptional()
   @IsString()
@@ -27,6 +32,20 @@ export class CreateArticleDto {
   @IsString()
   @MaxLength(100)
   authorName?: string
+
+  @IsOptional()
+  @IsEnum(ArticleStatus)
+  status?: ArticleStatus
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3)
+  relevance?: number
+
+  @IsOptional()
+  @IsDateString()
+  publishedAt?: string
 
   @IsOptional()
   @IsArray()
