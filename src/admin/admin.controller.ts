@@ -1,7 +1,9 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
+import { SkipThrottle } from '@nestjs/throttler'
 import { ArticlesService } from '../articles/articles.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 
+@SkipThrottle()
 @Controller('admin')
 @UseGuards(JwtAuthGuard)
 export class AdminController {
@@ -28,7 +30,7 @@ export class AdminController {
       limit: +limit || 20,
       type,
       status,
-      relevance: relevance ? +relevance : undefined,
+      relevance: relevance === 'null' ? null : relevance ? +relevance : undefined,
       tag,
       search,
       sort,

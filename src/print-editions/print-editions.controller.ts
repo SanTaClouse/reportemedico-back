@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { SkipThrottle } from '@nestjs/throttler'
 import { PrintEditionsService } from './print-editions.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CreatePrintEditionDto } from './dto/create-print-edition.dto'
@@ -13,24 +14,28 @@ export class PrintEditionsController {
     return this.service.findAll(true)
   }
 
+  @SkipThrottle()
   @Get('admin/all')
   @UseGuards(JwtAuthGuard)
   findAllAdmin() {
     return this.service.findAll(false)
   }
 
+  @SkipThrottle()
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() dto: CreatePrintEditionDto) {
     return this.service.create(dto)
   }
 
+  @SkipThrottle()
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
   update(@Param('id') id: string, @Body() dto: UpdatePrintEditionDto) {
     return this.service.update(id, dto)
   }
 
+  @SkipThrottle()
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   remove(@Param('id') id: string) {

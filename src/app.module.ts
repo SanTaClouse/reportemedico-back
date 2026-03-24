@@ -10,14 +10,15 @@ import { PrintEditionsModule } from './print-editions/print-editions.module'
 import { PodcastEpisodesModule } from './podcast-episodes/podcast-episodes.module'
 import { AdminModule } from './admin/admin.module'
 import { CouncilMembersModule } from './council-members/council-members.module'
+import { AdsModule } from './ads/ads.module'
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       {
-        ttl: 60000,  // 1 minute
-        limit: 10,
+        ttl: 60000,   // ventana de 1 minuto
+        limit: 120,   // 120 req/min por IP para rutas públicas (~2 req/seg)
       },
     ]),
     PrismaModule,
@@ -29,6 +30,7 @@ import { CouncilMembersModule } from './council-members/council-members.module'
     PodcastEpisodesModule,
     AdminModule,
     CouncilMembersModule,
+    AdsModule,
   ],
 })
 export class AppModule {}

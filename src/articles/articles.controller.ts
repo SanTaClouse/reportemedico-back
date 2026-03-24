@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
-import { Throttle } from '@nestjs/throttler'
+import { Throttle, SkipThrottle } from '@nestjs/throttler'
 import { ArticlesService } from './articles.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CreateArticleDto } from './dto/create-article.dto'
@@ -20,9 +20,26 @@ export class ArticlesController {
     return this.articlesService.getHome()
   }
 
+  @Get('relevance-counts')
+  @UseGuards(JwtAuthGuard)
+  getRelevanceCounts() {
+    return this.articlesService.getRelevanceCounts()
+  }
+
+  @SkipThrottle()
+  @Get('pending-specialties')
+  @UseGuards(JwtAuthGuard)
+  getPendingSpecialties() {
+    return this.articlesService.getPendingSpecialties()
+  }
+
   @Get('type/news')
-  getNews(@Query('page') page: string, @Query('limit') limit: string) {
-    return this.articlesService.findPublished(+page || 1, +limit || 10, 'NEWS')
+  getNews(
+    @Query('page') page: string,
+    @Query('limit') limit: string,
+    @Query('sort') sort: 'publishedAt_desc' | 'views_desc',
+  ) {
+    return this.articlesService.findPublished(+page || 1, +limit || 10, 'NEWS', undefined, sort || 'views_desc')
   }
 
   @Get('type/medical')
@@ -31,8 +48,25 @@ export class ArticlesController {
   }
 
   @Get('tag/:slug')
-  getByTag(@Param('slug') slug: string, @Query('page') page: string) {
-    return this.articlesService.findPublished(+page || 1, 10, undefined, slug)
+  getByTag(
+    @Param('slug') slug: string,
+    @Query('page') page: string,
+    @Query('limit') limit: string,
+    @Query('sort') sort: 'publishedAt_desc' | 'views_desc',
+  ) {
+    return this.articlesService.findPublished(+page || 1, +limit || 10, undefined, slug, sort || 'publishedAt_desc')
+  }
+
+  @Get('search')
+  search(
+    @Query('q') q: string,
+    @Query('page') page: string,
+    @Query('limit') limit: string,
+  ) {
+    if (!q || q.trim().length < 2) {
+      return { data: [], meta: { total: 0, page: 1, limit: 10, totalPages: 0 } }
+    }
+    return this.articlesService.search(q.trim(), +page || 1, +limit || 10)
   }
 
   @Get()
@@ -58,42 +92,49 @@ export class ArticlesController {
 
   // ─── RUTAS ADMIN ──────────────────────────────────────
 
+  @SkipThrottle()
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() dto: CreateArticleDto) {
     return this.articlesService.create(dto)
   }
 
+  @SkipThrottle()
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard)
   setStatus(@Param('id') id: string, @Body() dto: SetStatusDto) {
     return this.articlesService.setStatus(id, dto.status)
   }
 
+  @SkipThrottle()
   @Patch(':id/relevance')
   @UseGuards(JwtAuthGuard)
   setRelevance(@Param('id') id: string, @Body() dto: SetRelevanceDto) {
     return this.articlesService.setRelevance(id, dto.relevance)
   }
 
+  @SkipThrottle()
   @Patch(':id/approve-specialty')
   @UseGuards(JwtAuthGuard)
   approveSpecialty(@Param('id') id: string, @Body() dto: SpecialtyActionDto) {
     return this.articlesService.approveSpecialty(id, dto.name)
   }
 
+  @SkipThrottle()
   @Patch(':id/reject-specialty')
   @UseGuards(JwtAuthGuard)
   rejectSpecialty(@Param('id') id: string, @Body() dto: SpecialtyActionDto) {
     return this.articlesService.rejectSpecialty(id, dto.name)
   }
 
+  @SkipThrottle()
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
   update(@Param('id') id: string, @Body() dto: UpdateArticleDto) {
     return this.articlesService.update(id, dto)
   }
 
+  @SkipThrottle()
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   remove(@Param('id') id: string) {

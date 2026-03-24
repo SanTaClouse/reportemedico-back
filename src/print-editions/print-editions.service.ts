@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common'
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { CreatePrintEditionDto } from './dto/create-print-edition.dto'
@@ -49,14 +49,22 @@ export class PrintEditionsService {
         },
       })
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new ConflictException(`El número de edición ${dto.editionNumber} ya existe`)
+      if (e instanceof Prisma.PrismaClientKnownRequestError) {
+        if (e.code === 'P2002') throw new ConflictException(`El número de edición ${dto.editionNumber} ya existe`)
+        if (e.code === 'P2025') throw new NotFoundException(`Edición ${id} no encontrada`)
       }
       throw e
     }
   }
 
-  remove(id: string) {
-    return this.prisma.printEdition.delete({ where: { id } })
+  async remove(id: string) {
+    try {
+      return await this.prisma.printEdition.delete({ where: { id } })
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw new NotFoundException(`Edición ${id} no encontrada`)
+      }
+      throw e
+    }
   }
 }

@@ -1,59 +1,126 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common'
 import { Prisma, ArticleType, ArticleStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import slugify from 'slugify'
 import { CreateArticleDto } from './dto/create-article.dto'
 import { UpdateArticleDto } from './dto/update-article.dto'
 import { SubmitPublicDto } from './dto/submit-public.dto'
+import { sanitizeHtml, stripAllHtml } from '../utils/sanitize.util'
+import { SubscribersService } from '../subscribers/subscribers.service'
+
+// ─── Constantes editoriales ───────────────────────────────────────────────────
+
+/**
+ * Límites editoriales por nivel de relevancia.
+ * El nivel 5 ("Actualidad") no cascadea: el home simplemente muestra
+ * los 12 más recientes; los que caen fuera del take siguen en nivel 5.
+ */
+const RELEVANCE_LIMITS: Record<number, number> = {
+  1: 1,   // Hero — banner principal
+  2: 1,   // Lead — card grande izquierda
+  3: 2,   // Big Destacada — 2 cards a la derecha del lead
+  4: 8,   // Small Destacada — compactas debajo del featured grid
+  5: 12,  // Actualidad — grilla 4×3 debajo del featured
+}
 
 @Injectable()
-export class ArticlesService {
-  constructor(private prisma: PrismaService) {}
-
-  // ─── PÚBLICO ──────────────────────────────────────────
-
-  async getHome() {
-    const [hero, featured, latest, medicalArticles] = await Promise.all([
-      this.prisma.article.findFirst({
-        where: { relevance: 1, status: 'PUBLISHED' },
-        include: { tags: { include: { tag: true } } },
-      }),
-      this.prisma.article.findMany({
-        where: { relevance: 2, status: 'PUBLISHED' },
-        take: 4,
-        orderBy: { publishedAt: 'desc' },
-        include: { tags: { include: { tag: true } } },
-      }),
-      this.prisma.article.findMany({
-        where: { relevance: 3, status: 'PUBLISHED' },
-        take: 6,
-        orderBy: { publishedAt: 'desc' },
-        include: { tags: { include: { tag: true } } },
-      }),
-      this.prisma.article.findMany({
-        where: { type: 'MEDICAL_ARTICLE', status: 'PUBLISHED' },
-        take: 3,
-        orderBy: { publishedAt: 'desc' },
-        include: { tags: { include: { tag: true } } },
-      }),
-    ])
-
-    return { hero, featured, latest, medicalArticles }
+export class ArticlesService implements OnModuleDestroy {
+  constructor(
+    private prisma: PrismaService,
+    private subscribersService: SubscribersService,
+  ) {
+    // Fix #2 — flush de views cada 30 s
+    this.flushTimer = setInterval(() => void this.flushViews(), 30_000)
   }
 
-  async findPublished(page = 1, limit = 10, type?: string, tagSlug?: string) {
+  // ─── Fix #2: buffer de views en memoria ──────────────────────────────────────
+  //
+  // Problema original: cada visita = 1 write a la BD.
+  // Solución: acumular en un Map y escribir en batch cada 30 s.
+  // Trade-off: en restart del servidor se pierden las vistas no flusheadas
+  // (aceptable para MVP; usar Redis para producción a escala).
+
+  private viewsBuffer = new Map<string, number>()
+  private readonly flushTimer: NodeJS.Timeout
+
+  onModuleDestroy() {
+    clearInterval(this.flushTimer)
+    void this.flushViews() // flush final antes de apagar
+  }
+
+  private async flushViews() {
+    if (this.viewsBuffer.size === 0) return
+    const entries = [...this.viewsBuffer.entries()]
+    this.viewsBuffer.clear()
+
+    await Promise.allSettled(
+      entries.map(([slug, count]) =>
+        this.prisma.article.updateMany({
+          where: { slug },
+          data: { viewsCount: { increment: count } },
+        }),
+      ),
+    )
+  }
+
+  // ─── PÚBLICO ─────────────────────────────────────────────────────────────────
+
+  async getHome() {
+    const include = { tags: { include: { tag: true } } }
+    const [hero, lead, bigFeatured, smallFeatured, actualidad, medicalArticles] = await Promise.all([
+      // 1 — Hero
+      this.prisma.article.findFirst({ where: { relevance: 1, status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, include }),
+      // 2 — Lead (card grande izquierda)
+      this.prisma.article.findFirst({ where: { relevance: 2, status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, include }),
+      // 3 — Big Destacada (2 cards a la derecha)
+      this.prisma.article.findMany({ where: { relevance: 3, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[3], orderBy: { publishedAt: 'desc' }, include }),
+      // 4 — Small Destacada (compactas debajo del grid)
+      this.prisma.article.findMany({ where: { relevance: 4, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[4], orderBy: { publishedAt: 'desc' }, include }),
+      // 5 — Actualidad (grilla 4×3)
+      this.prisma.article.findMany({ where: { relevance: 5, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[5], orderBy: { publishedAt: 'desc' }, include }),
+      // Artículos médicos (sección aparte, sin relevancia)
+      this.prisma.article.findMany({ where: { type: 'MEDICAL_ARTICLE', status: 'PUBLISHED' }, take: 3, orderBy: { publishedAt: 'desc' }, include }),
+    ])
+
+    return { hero, lead, bigFeatured, smallFeatured, actualidad, medicalArticles }
+  }
+
+  /** Devuelve cuántos artículos PUBLISHED hay por nivel de relevancia */
+  async getRelevanceCounts(): Promise<Record<number, number>> {
+    const rows = await this.prisma.article.groupBy({
+      by: ['relevance'],
+      where: { status: 'PUBLISHED' },
+      _count: { _all: true },
+    })
+    const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+    for (const row of rows) {
+      if (row.relevance != null && row.relevance >= 1 && row.relevance <= 5) {
+        counts[row.relevance] = row._count._all
+      }
+    }
+    return counts
+  }
+
+  async findPublished(
+    page = 1,
+    limit = 10,
+    type?: string,
+    tagSlug?: string,
+    sort: 'publishedAt_desc' | 'views_desc' = 'publishedAt_desc',
+  ) {
     const where: Prisma.ArticleWhereInput = { status: ArticleStatus.PUBLISHED }
     if (type) where.type = type as ArticleType
-    if (tagSlug) {
-      where.tags = { some: { tag: { slug: tagSlug } } }
-    }
+    if (tagSlug) where.tags = { some: { tag: { slug: tagSlug } } }
+
+    const orderBy =
+      sort === 'views_desc' ? { viewsCount: 'desc' as const } : { publishedAt: 'desc' as const }
 
     const [data, total] = await Promise.all([
       this.prisma.article.findMany({
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { publishedAt: 'desc' },
+        orderBy,
         include: { tags: { include: { tag: true } } },
       }),
       this.prisma.article.count({ where }),
@@ -62,20 +129,28 @@ export class ArticlesService {
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } }
   }
 
-  async findBySlug(slug: string) {
+  // Fix #1 — findBySlug con opción "full"
+  //
+  // Problema original: siempre cargaba tags + seoMetadata + sources + relatedFrom.
+  // Solución: la opción `full` (default true) carga todo para SSR del detalle;
+  // pasando `full: false` se obtiene una versión liviana para listados.
+
+  async findBySlug(slug: string, options: { full?: boolean } = {}) {
+    const { full = true } = options
+
     const article = await this.prisma.article.findUnique({
       where: { slug },
       include: {
         tags: { include: { tag: true } },
         seoMetadata: true,
-        sources: { orderBy: { order: 'asc' } },
-        relatedFrom: {
-          include: {
-            relatedArticle: {
-              include: { tags: { include: { tag: true } } },
-            },
-          },
-        },
+        sources: full ? { orderBy: { order: 'asc' } } : false,
+        relatedFrom: full
+          ? {
+              include: {
+                relatedArticle: { include: { tags: { include: { tag: true } } } },
+              },
+            }
+          : false,
       },
     })
 
@@ -86,14 +161,128 @@ export class ArticlesService {
     return article
   }
 
-  async incrementViews(slug: string) {
-    return this.prisma.article.update({
-      where: { slug },
-      data: { viewsCount: { increment: 1 } },
-    })
+  // ─── BÚSQUEDA PÚBLICA ────────────────────────────────────────────────────────
+  //
+  // Usa columna persistente `search_vector` (tsvector con pesos A/B/C).
+  // Requiere haber ejecutado: npx prisma db execute --file=./prisma/search-setup.sql
+  //
+  // Ranking combinado: relevancia textual (70%) + popularidad log(views+1) (30%)
+  // Fallback automático a to_tsvector si search_vector aún no está poblado.
+
+  /**
+   * Convierte el input del usuario en un tsquery con prefix matching en la última palabra.
+   * "docto"        → "docto:*"           (encuentra doctores, doctor, doctoral...)
+   * "diabetes tip" → "diabetes & tip:*"  (encuentra diabetes tipo 2, tipos...)
+   * "doctor"       → "doctor:*"          (sigue funcionando con palabras completas)
+   */
+  private buildPrefixTsQuery(input: string): string {
+    const words = input
+      .trim()
+      .split(/\s+/)
+      .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+      .filter(Boolean)
+
+    if (words.length === 0) return ''
+
+    const last    = words[words.length - 1]
+    const leading = words.slice(0, -1)
+
+    return [...leading, `${last}:*`].join(' & ')
   }
 
-  // ─── ADMIN ────────────────────────────────────────────
+  async search(query: string, page: number, limit: number) {
+    const skip    = (page - 1) * limit
+    const tsQuery = this.buildPrefixTsQuery(query)
+
+    if (!tsQuery) {
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } }
+    }
+
+    const [articles, countResult] = await Promise.all([
+      this.prisma.$queryRaw<any[]>`
+        SELECT
+          id, type, title, slug, "featuredImage", "authorName",
+          status, relevance, "viewsCount", "publishedAt", "createdAt",
+          LEFT(content, 800) AS content,
+          -- Strip HTML para mostrar texto plano en la UI
+          regexp_replace(COALESCE(excerpt, LEFT(content, 200), ''), '<[^>]*>', '', 'g') AS excerpt,
+
+          -- Ranking: relevancia textual × 0.7 + popularidad × 0.3
+          (
+            ts_rank_cd(
+              COALESCE(
+                search_vector,
+                setweight(to_tsvector('spanish', COALESCE(title,   '')), 'A') ||
+                setweight(to_tsvector('spanish', COALESCE(excerpt, '')), 'B') ||
+                setweight(to_tsvector('spanish', COALESCE(content, '')), 'C')
+              ),
+              to_tsquery('spanish', ${tsQuery}),
+              32
+            ) * 0.7
+            + LOG("viewsCount"::float + 1) * 0.3
+          ) AS score,
+
+          -- Snippet con términos destacados (se stripea HTML antes de pasar a ts_headline)
+          ts_headline(
+            'spanish',
+            regexp_replace(COALESCE(excerpt, LEFT(content, 500), ''), '<[^>]*>', '', 'g'),
+            to_tsquery('spanish', ${tsQuery}),
+            'StartSel=<mark>, StopSel=</mark>, MaxWords=25, MinWords=10, MaxFragments=1, ShortWord=2'
+          ) AS headline
+
+        FROM "Article"
+        WHERE
+          status = 'PUBLISHED'
+          AND COALESCE(
+            search_vector,
+            setweight(to_tsvector('spanish', COALESCE(title,   '')), 'A') ||
+            setweight(to_tsvector('spanish', COALESCE(excerpt, '')), 'B') ||
+            setweight(to_tsvector('spanish', COALESCE(content, '')), 'C')
+          ) @@ to_tsquery('spanish', ${tsQuery})
+        ORDER BY score DESC, "publishedAt" DESC
+        LIMIT ${limit} OFFSET ${skip}
+      `,
+      this.prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*) AS count
+        FROM "Article"
+        WHERE
+          status = 'PUBLISHED'
+          AND COALESCE(
+            search_vector,
+            setweight(to_tsvector('spanish', COALESCE(title,   '')), 'A') ||
+            setweight(to_tsvector('spanish', COALESCE(excerpt, '')), 'B') ||
+            setweight(to_tsvector('spanish', COALESCE(content, '')), 'C')
+          ) @@ to_tsquery('spanish', ${tsQuery})
+      `,
+    ])
+
+    const total = Number(countResult[0]?.count ?? 0)
+
+    const articleIds = articles.map((a: any) => a.id)
+    const tags = await this.prisma.articleTag.findMany({
+      where: { articleId: { in: articleIds } },
+      include: { tag: true },
+    })
+
+    const articlesWithTags = articles.map((article: any) => ({
+      ...article,
+      tags: tags
+        .filter((t) => t.articleId === article.id)
+        .map((t) => ({ tag: t.tag })),
+    }))
+
+    return {
+      data: articlesWithTags,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    }
+  }
+
+  // Fix #2 — incrementViews acumula en buffer (ver arriba)
+  async incrementViews(slug: string) {
+    this.viewsBuffer.set(slug, (this.viewsBuffer.get(slug) ?? 0) + 1)
+  }
+
+  // ─── ADMIN ───────────────────────────────────────────────────────────────────
 
   async findByIdAdmin(id: string) {
     const article = await this.prisma.article.findUnique({
@@ -113,17 +302,18 @@ export class ArticlesService {
     limit?: number
     type?: string
     status?: string
-    relevance?: number
+    relevance?: number | null
     tag?: string
     search?: string
     sort?: string
   }) {
-    const { page = 1, limit = 20, type, status, relevance, tag, search, sort = 'publishedAt_desc' } = params
+    const { page = 1, limit = 20, type, status, relevance, tag, search, sort = 'publishedAt_desc' } =
+      params
 
     const where: Prisma.ArticleWhereInput = {}
     if (type) where.type = type as ArticleType
     if (status) where.status = status as ArticleStatus
-    if (relevance) where.relevance = relevance
+    if (relevance !== undefined) where.relevance = relevance
     if (tag) where.tags = { some: { tag: { slug: tag } } }
     if (search) {
       where.OR = [
@@ -132,14 +322,12 @@ export class ArticlesService {
       ]
     }
 
-    const orderBy = this.buildOrderBy(sort)
-
     const [data, total] = await Promise.all([
       this.prisma.article.findMany({
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy,
+        orderBy: this.buildOrderBy(sort),
         include: { tags: { include: { tag: true } } },
       }),
       this.prisma.article.count({ where }),
@@ -148,68 +336,264 @@ export class ArticlesService {
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } }
   }
 
+  // Fix #3 — generateSlug resistente a concurrencia
+  //
+  // Problema original: while + findUnique tiene race condition si dos requests
+  // llegan al mismo tiempo con el mismo título.
+  // Solución: dejamos que la BD rechace con P2002 (unique constraint) y
+  // reintentamos con sufijo — optimistic concurrency.
+
   async create(dto: CreateArticleDto) {
-    const slug = await this.generateSlug(dto.slug || dto.title)
-    return this.prisma.article.create({
-      data: {
-        type: dto.type,
-        title: dto.title,
-        excerpt: dto.excerpt,
-        content: dto.content,
-        featuredImage: dto.featuredImage,
-        authorName: dto.authorName ?? 'Reporte Médico',
-        slug,
-        status: dto.status ?? ArticleStatus.DRAFT,
-        relevance: dto.relevance ?? 3,
-        ...(dto.publishedAt && { publishedAt: new Date(dto.publishedAt) }),
-        tags: dto.tagIds?.length
-          ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
+    const base = slugify(dto.slug || dto.title, { lower: true, strict: true, locale: 'es' })
+    const data = {
+      type: dto.type,
+      title: stripAllHtml(dto.title),
+      excerpt: dto.excerpt ? stripAllHtml(dto.excerpt) : dto.excerpt,
+      content: sanitizeHtml(dto.content),
+      featuredImage: dto.featuredImage,
+      authorName: dto.authorName ?? 'Reporte Médico',
+      status: dto.status ?? ArticleStatus.DRAFT,
+      relevance: dto.relevance ?? 4,
+      ...(dto.publishedAt && { publishedAt: new Date(dto.publishedAt) }),
+      tags: dto.tagIds?.length
+        ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
+        : undefined,
+      sources: dto.sources?.filter((s) => !!s.title).length
+        ? {
+            create: dto.sources!.filter((s) => !!s.title).map((s, i) => ({
+              title: s.title,
+              url: s.url ?? null,
+              order: s.order ?? i,
+            })),
+          }
+        : undefined,
+      seoMetadata:
+        dto.seoMetadata?.metaTitle || dto.seoMetadata?.metaDescription
+          ? {
+              create: {
+                metaTitle: dto.seoMetadata!.metaTitle,
+                metaDescription: dto.seoMetadata!.metaDescription,
+              },
+            }
           : undefined,
-      },
-    })
+    }
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const slug = attempt === 0 ? base : `${base}-${attempt}`
+      try {
+        return await this.prisma.article.create({ data: { ...data, slug } })
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          (e.meta as any)?.target?.includes('slug')
+        ) {
+          continue // slug ocupado → siguiente sufijo
+        }
+        throw e
+      }
+    }
+    throw new Error('No se pudo generar un slug único tras 10 intentos')
   }
 
+  // Fix #4 — update de tags por diff, no delete-all + create
+  //
+  // Problema original: deleteMany {} + create recrea todos los registros
+  // aunque ninguno haya cambiado.
+  // Solución: calcular qué tags se agregan y cuáles se quitan, y solo tocar
+  // los que cambiaron. Envuelto en transacción.
+
   async update(id: string, dto: UpdateArticleDto) {
-    const { tagIds, slug: _slug, ...fields } = dto
-    return this.prisma.article.update({
-      where: { id },
-      data: {
-        title: fields.title,
-        excerpt: fields.excerpt,
-        content: fields.content,
-        featuredImage: fields.featuredImage,
-        authorName: fields.authorName,
-        ...(fields.status !== undefined && { status: fields.status }),
-        ...(fields.relevance !== undefined && { relevance: fields.relevance }),
-        ...(fields.publishedAt !== undefined && { publishedAt: new Date(fields.publishedAt) }),
-        ...(tagIds !== undefined && {
-          tags: {
-            deleteMany: {},
-            create: tagIds.map((tagId) => ({ tagId })),
-          },
-        }),
-      },
+    const { tagIds, sources, seoMetadata, slug: _slug, ...fields } = dto
+
+    return this.prisma.$transaction(async (tx) => {
+      // Diff de tags
+      if (tagIds !== undefined) {
+        const current = await tx.articleTag.findMany({
+          where: { articleId: id },
+          select: { tagId: true },
+        })
+        const currentSet = new Set(current.map((t) => t.tagId))
+        const newSet = new Set(tagIds)
+
+        const toDelete = [...currentSet].filter((tid) => !newSet.has(tid))
+        const toCreate = [...newSet].filter((tid) => !currentSet.has(tid))
+
+        if (toDelete.length) {
+          await tx.articleTag.deleteMany({ where: { articleId: id, tagId: { in: toDelete } } })
+        }
+        if (toCreate.length) {
+          await tx.articleTag.createMany({
+            data: toCreate.map((tagId) => ({ articleId: id, tagId })),
+          })
+        }
+      }
+
+      // Sources: delete+recreate sigue siendo correcto (el orden puede cambiar)
+      if (sources !== undefined) {
+        await tx.articleSource.deleteMany({ where: { articleId: id } })
+        const validSources = sources.filter((s) => !!s.title)
+        if (validSources.length) {
+          await tx.articleSource.createMany({
+            data: validSources.map((s, i) => ({
+              articleId: id,
+              title: s.title,
+              url: s.url ?? null,
+              order: s.order ?? i,
+            })),
+          })
+        }
+      }
+
+      // Aplicar cascada si el artículo será PUBLISHED y cambia de relevance o de estado
+      if (fields.relevance !== undefined || fields.status !== undefined) {
+        const current = await tx.article.findUnique({
+          where: { id },
+          select: { relevance: true, status: true },
+        })
+        if (current) {
+          const targetStatus = (fields.status ?? current.status) as ArticleStatus
+          const targetRelevance = fields.relevance ?? current.relevance
+          const wasPublished = current.status === ArticleStatus.PUBLISHED
+          const willBePublished = targetStatus === ArticleStatus.PUBLISHED
+          const relevanceChanges = fields.relevance !== undefined && fields.relevance !== current.relevance
+
+          if (willBePublished && (!wasPublished || relevanceChanges) && targetRelevance != null) {
+            await this.applyRelevanceCascade(tx, id, targetRelevance)
+          }
+        }
+      }
+
+      return tx.article.update({
+        where: { id },
+        data: {
+          title: fields.title !== undefined ? stripAllHtml(fields.title) : undefined,
+          excerpt: fields.excerpt !== undefined ? stripAllHtml(fields.excerpt) : undefined,
+          content: fields.content !== undefined ? sanitizeHtml(fields.content) : undefined,
+          featuredImage: fields.featuredImage,
+          authorName: fields.authorName,
+          ...(fields.status !== undefined && { status: fields.status }),
+          ...(fields.relevance !== undefined && { relevance: fields.relevance }),
+          ...(fields.publishedAt !== undefined && { publishedAt: new Date(fields.publishedAt) }),
+          ...(seoMetadata !== undefined && {
+            seoMetadata: {
+              upsert: {
+                create: {
+                  metaTitle: seoMetadata.metaTitle,
+                  metaDescription: seoMetadata.metaDescription,
+                },
+                update: {
+                  metaTitle: seoMetadata.metaTitle,
+                  metaDescription: seoMetadata.metaDescription,
+                },
+              },
+            },
+          }),
+        },
+      })
     })
   }
 
   async setStatus(id: string, status: ArticleStatus) {
-    return this.prisma.article.update({
-      where: { id },
-      data: {
-        status,
-        ...(status === ArticleStatus.PUBLISHED && { publishedAt: new Date() }),
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.article.findUnique({
+        where: { id },
+        select: { relevance: true, status: true },
+      })
+      if (!current) throw new NotFoundException('Artículo no encontrado')
+
+      const wasPublished = current.status === ArticleStatus.PUBLISHED
+      const willBePublished = status === ArticleStatus.PUBLISHED
+
+      // Aplicar cascada solo al pasar de no-publicado a publicado
+      if (willBePublished && !wasPublished && current.relevance != null) {
+        await this.applyRelevanceCascade(tx, id, current.relevance)
+      }
+
+      return tx.article.update({
+        where: { id },
+        data: {
+          status,
+          ...(willBePublished && { publishedAt: new Date() }),
+        },
+      })
     })
+
+    // TODO: notificación al autor por email (pendiente — implementar con dominio verificado)
+    // El authorEmail queda guardado en el artículo para que el admin notifique manualmente
+
+    return updated
+  }
+
+  /**
+   * Aplica la cascada de relevancias dentro de una transacción.
+   *
+   * Reglas:
+   *  → 1: desplaza el hero existente a 2
+   *  → 2: desplaza el lead existente a 3
+   *  → 3: si hay ≥ 2 en nivel 3 (sin contar id), el más antiguo baja a 4
+   *  → 4: si hay ≥ 8 en nivel 4 (sin contar id), el más antiguo baja a 5
+   *  → 5: sin cascada (el home simplemente muestra los 12 más recientes)
+   *
+   * Solo se aplica a artículos PUBLISHED.
+   */
+  /**
+   * Asegura que haya espacio en `level` para un artículo adicional PUBLISHED,
+   * desplazando el exceso al nivel siguiente de forma recursiva.
+   * `incomingId` — artículo que ocupará este nivel (se excluye del conteo).
+   */
+  private async makeRoomAtLevel(
+    tx: Prisma.TransactionClient,
+    level: number,
+    incomingId: string,
+  ): Promise<void> {
+    if (level > 5) return
+    const pub = ArticleStatus.PUBLISHED
+    const limit = RELEVANCE_LIMITS[level]
+
+    const count = await tx.article.count({
+      where: { relevance: level, status: pub, id: { not: incomingId } },
+    })
+    const excess = count - (limit - 1) // cuántos necesitan moverse
+    if (excess <= 0) return            // hay espacio, no hay nada que hacer
+
+    const toDisplace = await tx.article.findMany({
+      where: { relevance: level, status: pub, id: { not: incomingId } },
+      orderBy: { publishedAt: 'asc' },
+      take: excess,
+      select: { id: true },
+    })
+    if (!toDisplace.length) return
+
+    if (level === 5) {
+      // Nivel 5 es el final de la cascada: los desplazados pierden su slot editorial
+      await tx.article.updateMany({
+        where: { id: { in: toDisplace.map((a) => a.id) } },
+        data: { relevance: null },
+      })
+    } else {
+      // Hacer espacio en el nivel siguiente antes de mover
+      for (const a of toDisplace) {
+        await this.makeRoomAtLevel(tx, level + 1, a.id)
+      }
+      await tx.article.updateMany({
+        where: { id: { in: toDisplace.map((a) => a.id) } },
+        data: { relevance: level + 1 },
+      })
+    }
+  }
+
+  private async applyRelevanceCascade(
+    tx: Prisma.TransactionClient,
+    id: string,
+    targetRelevance: number,
+  ): Promise<void> {
+    await this.makeRoomAtLevel(tx, targetRelevance, id)
   }
 
   async setRelevance(id: string, relevance: number) {
     return this.prisma.$transaction(async (tx) => {
-      if (relevance === 1) {
-        await tx.article.updateMany({
-          where: { relevance: 1, status: ArticleStatus.PUBLISHED, id: { not: id } },
-          data: { relevance: 2 },
-        })
-      }
+      await this.applyRelevanceCascade(tx, id, relevance)
       return tx.article.update({ where: { id }, data: { relevance } })
     })
   }
@@ -219,68 +603,113 @@ export class ArticlesService {
   }
 
   async submitPublic(dto: SubmitPublicDto) {
-    const slug = await this.generateSlug(dto.title)
+    const base = slugify(dto.title, { lower: true, strict: true, locale: 'es' })
     const filteredSources = dto.sources?.filter((s) => !!s.title) ?? []
+    const data = {
+      title: stripAllHtml(dto.title),
+      excerpt: dto.excerpt ? stripAllHtml(dto.excerpt) : dto.excerpt,
+      content: sanitizeHtml(dto.content),
+      featuredImage: dto.featuredImage,
+      authorName: stripAllHtml(dto.authorName),
+      authorEmail: dto.authorEmail ?? null,
+      type: ArticleType.MEDICAL_ARTICLE,
+      status: ArticleStatus.PENDING,
+      suggestedSpecialties: dto.suggestedSpecialties ?? [],
+      tags: dto.tagIds?.length
+        ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
+        : undefined,
+      sources: filteredSources.length
+        ? {
+            create: filteredSources.map((s) => ({
+              title: s.title,
+              url: s.url ?? null,
+              order: s.order ?? 0,
+            })),
+          }
+        : undefined,
+    }
 
-    return this.prisma.article.create({
-      data: {
-        title: dto.title,
-        excerpt: dto.excerpt,
-        content: dto.content,
-        featuredImage: dto.featuredImage,
-        authorName: dto.authorName,
-        slug,
-        type: ArticleType.MEDICAL_ARTICLE,
-        status: ArticleStatus.PENDING,
-        suggestedSpecialties: dto.suggestedSpecialties ?? [],
-        tags: dto.tagIds?.length
-          ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
-          : undefined,
-        sources: filteredSources.length > 0
-          ? {
-              create: filteredSources.map((s) => ({
-                title: s.title,
-                url: s.url ?? null,
-                order: s.order ?? 0,
-              })),
-            }
-          : undefined,
-      },
-    })
+    // Fix #3 aplicado también al submit público
+    let article: Awaited<ReturnType<typeof this.prisma.article.create>> | null = null
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const slug = attempt === 0 ? base : `${base}-${attempt}`
+      try {
+        article = await this.prisma.article.create({ data: { ...data, slug } })
+        break
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          (e.meta as any)?.target?.includes('slug')
+        ) {
+          continue
+        }
+        throw e
+      }
+    }
+    if (!article) throw new Error('No se pudo generar un slug único')
+
+    // Side-effects: suscripción + email de confirmación (best-effort)
+    if (dto.authorEmail) {
+      try {
+        await this.subscribersService.subscribeFromArticle(
+          dto.authorEmail,
+          dto.authorName,
+          dto.tagIds ?? [],
+        )
+      } catch { /* ignorar */ }
+      // TODO: email de confirmación de recepción (pendiente — implementar con dominio verificado)
+    }
+
+    return article
   }
 
-  // ─── ESPECIALIDADES PROPUESTAS ────────────────────────
+  // ─── ESPECIALIDADES PROPUESTAS ────────────────────────────────────────────────
+
+  async getPendingSpecialties() {
+    const articles = await this.prisma.article.findMany({
+      where: { suggestedSpecialties: { isEmpty: false } },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        authorName: true,
+        suggestedSpecialties: true,
+      },
+    })
+    // Aplanar: un registro por especialidad propuesta
+    return articles.flatMap((a) =>
+      (a.suggestedSpecialties as string[]).map((name) => ({
+        articleId: a.id,
+        articleTitle: a.title,
+        articleStatus: a.status,
+        authorName: a.authorName,
+        specialtyName: name,
+      })),
+    )
+  }
 
   async approveSpecialty(articleId: string, specialtyName: string) {
     const article = await this.prisma.article.findUnique({ where: { id: articleId } })
     if (!article) throw new NotFoundException('Artículo no encontrado')
 
-    // Normalizar: primera letra mayúscula
-    const normalized =
-      specialtyName.charAt(0).toUpperCase() + specialtyName.slice(1).trim()
+    const normalized = specialtyName.charAt(0).toUpperCase() + specialtyName.slice(1).trim()
 
-    // Buscar tag existente comparando sin acentos
-    const allTags = await this.prisma.tag.findMany({
-      select: { id: true, name: true, slug: true },
-    })
+    const allTags = await this.prisma.tag.findMany({ select: { id: true, name: true, slug: true } })
     let tag =
-      allTags.find(
-        (t) => this.stripAccents(t.name) === this.stripAccents(normalized),
-      ) ?? null
+      allTags.find((t) => this.stripAccents(t.name) === this.stripAccents(normalized)) ?? null
 
     if (!tag) {
       const tagSlug = slugify(normalized, { lower: true, strict: true, locale: 'es' })
       tag = await this.prisma.tag.create({ data: { name: normalized, slug: tagSlug } })
     }
 
-    // Vincular tag al artículo (upsert para no duplicar)
     await this.prisma.articleTag.upsert({
       where: { articleId_tagId: { articleId, tagId: tag.id } },
       create: { articleId, tagId: tag.id },
       update: {},
     })
 
-    // Eliminar de suggestedSpecialties
     const updated = (article.suggestedSpecialties as string[]).filter(
       (s) => s.toLowerCase() !== specialtyName.toLowerCase(),
     )
@@ -306,25 +735,10 @@ export class ArticlesService {
     })
   }
 
-  // ─── HELPERS ──────────────────────────────────────────
+  // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
-  private async generateSlug(title: string) {
-    const base = slugify(title, { lower: true, strict: true, locale: 'es' })
-    let slug = base
-    let counter = 1
-    while (await this.prisma.article.findUnique({ where: { slug } })) {
-      slug = `${base}-${counter++}`
-    }
-    return slug
-  }
-
-  /** Quita acentos y pasa a minúsculas para comparación sin acentos */
   private stripAccents(str: string): string {
-    return str
-      .trim()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
+    return str.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
   }
 
   private buildOrderBy(sort: string): Prisma.ArticleOrderByWithRelationInput {

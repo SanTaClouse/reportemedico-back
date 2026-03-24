@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsInt, Min, MinLength, MaxLength } from 'class-validator'
+import { IsString, IsOptional, IsBoolean, IsInt, Min, MinLength, MaxLength, IsUrl } from 'class-validator'
 
 export class CreateCouncilMemberDto {
   @IsString()
@@ -16,7 +16,7 @@ export class CreateCouncilMemberDto {
   photo?: string
 
   @IsOptional()
-  @IsString()
+  @IsUrl({}, { message: 'El LinkedIn URL no es válido' })
   linkedinUrl?: string
 
   @IsOptional()

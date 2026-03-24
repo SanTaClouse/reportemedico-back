@@ -1,5 +1,33 @@
-import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, IsInt, Min, Max, IsDateString } from 'class-validator'
+import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, IsInt, Min, Max, IsDateString, ValidateNested } from 'class-validator'
+import { Type } from 'class-transformer'
 import { ArticleType, ArticleStatus } from '@prisma/client'
+
+class ArticleSourceDto {
+  @IsString()
+  @MaxLength(300)
+  title!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  url?: string
+
+  @IsOptional()
+  @IsInt()
+  order?: number
+}
+
+class SeoMetadataDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(70)
+  metaTitle?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(170)
+  metaDescription?: string
+}
 
 export class CreateArticleDto {
   @IsEnum(ArticleType)
@@ -40,7 +68,7 @@ export class CreateArticleDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(3)
+  @Max(5)
   relevance?: number
 
   @IsOptional()
@@ -51,4 +79,15 @@ export class CreateArticleDto {
   @IsArray()
   @IsUUID(undefined, { each: true })
   tagIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ArticleSourceDto)
+  sources?: ArticleSourceDto[]
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SeoMetadataDto)
+  seoMetadata?: SeoMetadataDto
 }

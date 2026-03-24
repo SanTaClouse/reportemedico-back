@@ -8,6 +8,8 @@ import {
   ValidateNested,
   IsInt,
   Min,
+  IsUrl,
+  IsEmail,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 
@@ -18,7 +20,7 @@ export class SourceDto {
   title!: string
 
   @IsOptional()
-  @IsString()
+  @IsUrl({}, { message: 'La URL de la fuente no es válida' })
   url?: string
 
   @IsOptional()
@@ -39,7 +41,6 @@ export class SubmitPublicDto {
   excerpt?: string
 
   @IsString()
-  @MinLength(50)
   content!: string
 
   @IsString()
@@ -67,4 +68,8 @@ export class SubmitPublicDto {
   @ValidateNested({ each: true })
   @Type(() => SourceDto)
   sources?: SourceDto[]
+
+  @IsOptional()
+  @IsEmail()
+  authorEmail?: string
 }

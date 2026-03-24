@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { CreateCouncilMemberDto } from './dto/create-council-member.dto'
 import { UpdateCouncilMemberDto } from './dto/update-council-member.dto'
@@ -45,21 +46,35 @@ export class CouncilMembersService {
       })
     }
 
-    return this.prisma.councilMember.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.role !== undefined && { role: dto.role }),
-        ...(dto.photo !== undefined && { photo: dto.photo }),
-        ...(dto.linkedinUrl !== undefined && { linkedinUrl: dto.linkedinUrl }),
-        ...(dto.isFeatured !== undefined && { isFeatured: dto.isFeatured }),
-        ...(dto.isVisible !== undefined && { isVisible: dto.isVisible }),
-        ...(dto.order !== undefined && { order: dto.order }),
-      },
-    })
+    try {
+      return await this.prisma.councilMember.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined && { name: dto.name }),
+          ...(dto.role !== undefined && { role: dto.role }),
+          ...(dto.photo !== undefined && { photo: dto.photo }),
+          ...(dto.linkedinUrl !== undefined && { linkedinUrl: dto.linkedinUrl }),
+          ...(dto.isFeatured !== undefined && { isFeatured: dto.isFeatured }),
+          ...(dto.isVisible !== undefined && { isVisible: dto.isVisible }),
+          ...(dto.order !== undefined && { order: dto.order }),
+        },
+      })
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw new NotFoundException(`Miembro ${id} no encontrado`)
+      }
+      throw e
+    }
   }
 
-  remove(id: string) {
-    return this.prisma.councilMember.delete({ where: { id } })
+  async remove(id: string) {
+    try {
+      return await this.prisma.councilMember.delete({ where: { id } })
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw new NotFoundException(`Miembro ${id} no encontrado`)
+      }
+      throw e
+    }
   }
 }
