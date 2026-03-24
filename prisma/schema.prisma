@@ -45,9 +45,10 @@ model Article {
 
   authorName     String        @default("Reporte Médico")
   authorPhoto    String?
+  authorEmail    String?
 
   status         ArticleStatus @default(DRAFT)
-  relevance      Int           @default(3)
+  relevance      Int?
 
   viewsCount     Int           @default(0)
 
@@ -62,6 +63,7 @@ model Article {
   relatedTo      RelatedArticle[] @relation("ArticleTo")
   sources              ArticleSource[]
   suggestedSpecialties String[]        @default([])
+  search_vector        Unsupported("tsvector")?
 
   @@index([slug])
   @@index([status, type])
@@ -86,13 +88,14 @@ enum ArticleStatus {
 // ─────────────────────────────────────────────────
 
 model Tag {
-  id          String       @id @default(uuid())
-  name        String       @unique
-  slug        String       @unique
+  id          String          @id @default(uuid())
+  name        String          @unique
+  slug        String          @unique
   description String?
-  createdAt   DateTime     @default(now())
+  createdAt   DateTime        @default(now())
 
   articles    ArticleTag[]
+  subscribers SubscriberTag[]
 
   @@index([slug])
 }
@@ -107,16 +110,49 @@ model ArticleTag {
 }
 
 // ─────────────────────────────────────────────────
+// SUSCRIPTORES
+// ─────────────────────────────────────────────────
+
+model Subscriber {
+  id        String           @id @default(uuid())
+  email     String           @unique
+  name      String?
+  source    SubscriberSource
+  createdAt DateTime         @default(now())
+
+  tags      SubscriberTag[]
+
+  @@index([source])
+  @@index([createdAt])
+}
+
+enum SubscriberSource {
+  ARTICLE_SUBMISSION
+  NEWSLETTER_SIGNUP
+}
+
+model SubscriberTag {
+  subscriberId String
+  tagId        String
+  subscriber   Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  tag          Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([subscriberId, tagId])
+}
+
+// ─────────────────────────────────────────────────
 // MEDIA (Cloudinary)
 // ─────────────────────────────────────────────────
 
 model Media {
   id        String   @id @default(uuid())
   url       String
-  publicId  String
+  publicId  String   @unique
   altText   String?
   width     Int?
   height    Int?
+  fileHash  String?  @unique  // SHA-256 del buffer — previene subidas duplicadas
+  folder    String?            // Contexto: Reporte-Medico/Media, Noticias, Ads…
   createdAt DateTime @default(now())
 
   articles  ArticleMedia[]
@@ -170,6 +206,8 @@ model ArticleSource {
   title     String
   url       String?
   order     Int     @default(0)
+
+  @@index([articleId])
 }
 
 // ─────────────────────────────────────────────────
@@ -185,6 +223,8 @@ model PrintEdition {
   publishedAt   DateTime
   isVisible     Boolean  @default(true)
   createdAt     DateTime @default(now())
+
+  @@index([isVisible])
 }
 
 // ─────────────────────────────────────────────────
@@ -201,6 +241,52 @@ model PodcastEpisode {
   order        Int      @default(0)
   publishedAt  DateTime @default(now())
   createdAt    DateTime @default(now())
+
+  @@index([isVisible, order])
+}
+
+// ─────────────────────────────────────────────────
+// PUBLICIDAD — SLOTS Y ANUNCIOS
+// ─────────────────────────────────────────────────
+
+enum AdSlotDisplayMode {
+  SINGLE  // Un anuncio aleatorio por visita
+  STRIP   // Todos los anuncios en marquee continuo
+}
+
+model AdSlot {
+  id          String             @id @default(uuid())
+  name        String             @unique  // ej: "banner_home_1"
+  description String?
+  isActive    Boolean            @default(true)
+  displayMode AdSlotDisplayMode  @default(SINGLE)
+  assignments AdSlotAssignment[]
+}
+
+model Ad {
+  id          String             @id @default(uuid())
+  title       String
+  imageUrl    String
+  link        String
+  isActive    Boolean            @default(true)
+  clicks      Int                @default(0)
+  impressions Int                @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  assignments AdSlotAssignment[]
+}
+
+/// Tabla de unión Ad ↔ AdSlot — un anuncio puede estar en varios banners
+model AdSlotAssignment {
+  id     String @id @default(uuid())
+  adId   String
+  slotId String
+  order  Int    @default(0)
+  ad     Ad     @relation(fields: [adId], references: [id], onDelete: Cascade)
+  slot   AdSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([adId, slotId])
+  @@index([slotId, order])
 }
 
 // ─────────────────────────────────────────────────
@@ -219,5 +305,5 @@ model CouncilMember {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([order])
+  @@index([isVisible, order])
 }
