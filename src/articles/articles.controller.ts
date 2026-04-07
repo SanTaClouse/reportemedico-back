@@ -8,6 +8,8 @@ import { SubmitPublicDto } from './dto/submit-public.dto'
 import { SetStatusDto } from './dto/set-status.dto'
 import { SetRelevanceDto } from './dto/set-relevance.dto'
 import { SpecialtyActionDto } from './dto/specialty-action.dto'
+import { AddGalleryImageDto } from './dto/add-gallery-image.dto'
+import { ReorderGalleryDto } from './dto/reorder-gallery.dto'
 
 @Controller('articles')
 export class ArticlesController {
@@ -139,5 +141,39 @@ export class ArticlesController {
   @UseGuards(JwtAuthGuard)
   remove(@Param('id') id: string) {
     return this.articlesService.remove(id)
+  }
+
+  // ─── GALERÍA ──────────────────────────────────────────
+
+  @SkipThrottle()
+  @Post(':id/gallery')
+  @UseGuards(JwtAuthGuard)
+  addGalleryImage(@Param('id') id: string, @Body() dto: AddGalleryImageDto) {
+    return this.articlesService.addGalleryImage(id, dto.mediaId, dto.caption, dto.position)
+  }
+
+  @SkipThrottle()
+  @Delete(':id/gallery/:mediaId')
+  @UseGuards(JwtAuthGuard)
+  removeGalleryImage(@Param('id') id: string, @Param('mediaId') mediaId: string) {
+    return this.articlesService.removeGalleryImage(id, mediaId)
+  }
+
+  @SkipThrottle()
+  @Patch(':id/gallery/reorder')
+  @UseGuards(JwtAuthGuard)
+  reorderGallery(@Param('id') id: string, @Body() dto: ReorderGalleryDto) {
+    return this.articlesService.reorderGallery(id, dto.items)
+  }
+
+  @SkipThrottle()
+  @Patch(':id/gallery/:mediaId/caption')
+  @UseGuards(JwtAuthGuard)
+  updateGalleryCaption(
+    @Param('id') id: string,
+    @Param('mediaId') mediaId: string,
+    @Body('caption') caption: string,
+  ) {
+    return this.articlesService.updateGalleryCaption(id, mediaId, caption)
   }
 }

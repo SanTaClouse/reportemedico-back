@@ -163,6 +163,7 @@ model ArticleMedia {
   articleId String
   mediaId   String
   position  Int     @default(0)
+  caption   String?
   article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
   media     Media   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 

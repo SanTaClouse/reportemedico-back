@@ -26,8 +26,10 @@ export class MediaService {
       .replace(/[\u0300-\u036f]/g, '')   // quitar tildes
       .replace(/[^a-z0-9]+/g, '-')      // caracteres especiales → guión
       .replace(/^-|-$/g, '')            // quitar guiones al inicio/fin
-      .slice(0, 60)                      // máximo 60 chars
-    return `${dateStr}_${baseName}`
+      .slice(0, 50)                      // máximo 50 chars (dejamos espacio para el sufijo)
+    // Sufijo aleatorio de 6 chars para evitar colisiones de publicId en la BD
+    const rand = Math.random().toString(36).slice(2, 8)
+    return `${dateStr}_${baseName}_${rand}`
   }
 
   private uploadToCloudinary(file: Express.Multer.File, folder: string): Promise<any> {
@@ -75,6 +77,21 @@ export class MediaService {
   async uploadConsejo(file: Express.Multer.File) {
     const result = await this.uploadToCloudinary(file, 'Reporte-Medico/Consejo')
     return { url: result.secure_url as string }
+  }
+
+  /** Upload para galerías de noticias (admin). Guarda en BD para poder asociar a artículos. */
+  async uploadGaleria(file: Express.Multer.File, altText?: string) {
+    const result = await this.uploadToCloudinary(file, 'Reporte-Medico/Galerias')
+    return this.prisma.media.create({
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+        altText,
+        width: result.width,
+        height: result.height,
+        folder: 'Reporte-Medico/Galerias',
+      },
+    })
   }
 
   findAll() {

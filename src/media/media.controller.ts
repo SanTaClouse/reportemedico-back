@@ -53,6 +53,14 @@ export class MediaController {
     return this.mediaService.uploadConsejo(file)
   }
 
+  /** Fotos de galería de noticias (admin) — guarda en BD para asociar a artículos */
+  @Post('upload/galeria')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file', FILE_UPLOAD_OPTIONS))
+  uploadGaleria(@UploadedFile() file: Express.Multer.File, @Body('altText') altText?: string) {
+    return this.mediaService.uploadGaleria(file, altText)
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard)
   findAll() {

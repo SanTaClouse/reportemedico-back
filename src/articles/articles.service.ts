@@ -147,6 +147,9 @@ export class ArticlesService implements OnModuleDestroy {
         tags: { include: { tag: true } },
         seoMetadata: true,
         sources: full ? { orderBy: { order: 'asc' } } : false,
+        media: full
+          ? { include: { media: true }, orderBy: { position: 'asc' } }
+          : false,
         relatedFrom: full
           ? {
               include: {
@@ -294,6 +297,7 @@ export class ArticlesService implements OnModuleDestroy {
         tags: { include: { tag: true } },
         seoMetadata: true,
         sources: { orderBy: { order: 'asc' } },
+        media: { include: { media: true }, orderBy: { position: 'asc' } },
       },
     })
     if (!article) throw new NotFoundException('Artículo no encontrado')
@@ -694,6 +698,55 @@ export class ArticlesService implements OnModuleDestroy {
     }
 
     return article
+  }
+
+  // ─── GALERÍA DE FOTOS ────────────────────────────────────────────────────────
+
+  async addGalleryImage(articleId: string, mediaId: string, caption?: string, position?: number) {
+    if (position === undefined) {
+      const agg = await this.prisma.articleMedia.aggregate({
+        where: { articleId },
+        _max: { position: true },
+      })
+      position = (agg._max.position ?? -1) + 1
+    }
+
+    return this.prisma.articleMedia.upsert({
+      where: { articleId_mediaId: { articleId, mediaId } },
+      create: { articleId, mediaId, caption, position },
+      update: { caption, position },
+      include: { media: true },
+    })
+  }
+
+  async removeGalleryImage(articleId: string, mediaId: string) {
+    return this.prisma.articleMedia.delete({
+      where: { articleId_mediaId: { articleId, mediaId } },
+    })
+  }
+
+  async reorderGallery(articleId: string, items: { mediaId: string; position: number }[]) {
+    await Promise.all(
+      items.map(({ mediaId, position }) =>
+        this.prisma.articleMedia.update({
+          where: { articleId_mediaId: { articleId, mediaId } },
+          data: { position },
+        }),
+      ),
+    )
+    return this.prisma.articleMedia.findMany({
+      where: { articleId },
+      include: { media: true },
+      orderBy: { position: 'asc' },
+    })
+  }
+
+  async updateGalleryCaption(articleId: string, mediaId: string, caption: string) {
+    return this.prisma.articleMedia.update({
+      where: { articleId_mediaId: { articleId, mediaId } },
+      data: { caption },
+      include: { media: true },
+    })
   }
 
   // ─── ESPECIALIDADES PROPUESTAS ────────────────────────────────────────────────
