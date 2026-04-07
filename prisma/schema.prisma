@@ -299,7 +299,7 @@ model CouncilMember {
   name        String
   role        String
   photo       String?
-  linkedinUrl String?
+  profileUrl String?
   isFeatured  Boolean  @default(false)
   isVisible   Boolean  @default(true)
   order       Int      @default(0)

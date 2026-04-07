@@ -18,8 +18,8 @@ export class UpdateCouncilMemberDto {
   photo?: string
 
   @IsOptional()
-  @IsUrl({}, { message: 'El LinkedIn URL no es válido' })
-  linkedinUrl?: string
+  @IsUrl({}, { message: 'El URL de perfil no es válido' })
+  profileUrl?: string
 
   @IsOptional()
   @IsBoolean()
