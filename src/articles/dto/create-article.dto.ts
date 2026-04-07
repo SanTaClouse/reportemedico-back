@@ -1,4 +1,4 @@
-import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, IsInt, Min, Max, IsDateString, ValidateNested } from 'class-validator'
+import { IsEnum, IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, IsInt, Min, Max, IsDateString, ValidateNested, ValidateIf } from 'class-validator'
 import { Type } from 'class-transformer'
 import { ArticleType, ArticleStatus } from '@prisma/client'
 
@@ -65,11 +65,13 @@ export class CreateArticleDto {
   @IsEnum(ArticleStatus)
   status?: ArticleStatus
 
+  // null = "Sin slot editorial" (publicado pero fuera del home)
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsInt()
   @Min(1)
   @Max(5)
-  relevance?: number
+  relevance?: number | null
 
   @IsOptional()
   @IsDateString()

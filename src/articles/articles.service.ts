@@ -67,17 +67,20 @@ export class ArticlesService implements OnModuleDestroy {
 
   async getHome() {
     const include = { tags: { include: { tag: true } } }
+    // Los slots editoriales (relevance 1-5) son exclusivos de NEWS.
+    // Los MEDICAL_ARTICLE viven en su propia sección y nunca ocupan estos slots,
+    // así evitamos que un artículo médico aparezca duplicado en el home.
     const [hero, lead, bigFeatured, smallFeatured, actualidad, medicalArticles] = await Promise.all([
       // 1 — Hero
-      this.prisma.article.findFirst({ where: { relevance: 1, status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, include }),
+      this.prisma.article.findFirst({ where: { relevance: 1, status: 'PUBLISHED', type: 'NEWS' }, orderBy: { publishedAt: 'desc' }, include }),
       // 2 — Lead (card grande izquierda)
-      this.prisma.article.findFirst({ where: { relevance: 2, status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, include }),
+      this.prisma.article.findFirst({ where: { relevance: 2, status: 'PUBLISHED', type: 'NEWS' }, orderBy: { publishedAt: 'desc' }, include }),
       // 3 — Big Destacada (2 cards a la derecha)
-      this.prisma.article.findMany({ where: { relevance: 3, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[3], orderBy: { publishedAt: 'desc' }, include }),
+      this.prisma.article.findMany({ where: { relevance: 3, status: 'PUBLISHED', type: 'NEWS' }, take: RELEVANCE_LIMITS[3], orderBy: { publishedAt: 'desc' }, include }),
       // 4 — Small Destacada (compactas debajo del grid)
-      this.prisma.article.findMany({ where: { relevance: 4, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[4], orderBy: { publishedAt: 'desc' }, include }),
+      this.prisma.article.findMany({ where: { relevance: 4, status: 'PUBLISHED', type: 'NEWS' }, take: RELEVANCE_LIMITS[4], orderBy: { publishedAt: 'desc' }, include }),
       // 5 — Actualidad (grilla 4×3)
-      this.prisma.article.findMany({ where: { relevance: 5, status: 'PUBLISHED' }, take: RELEVANCE_LIMITS[5], orderBy: { publishedAt: 'desc' }, include }),
+      this.prisma.article.findMany({ where: { relevance: 5, status: 'PUBLISHED', type: 'NEWS' }, take: RELEVANCE_LIMITS[5], orderBy: { publishedAt: 'desc' }, include }),
       // Artículos médicos (sección aparte, sin relevancia)
       this.prisma.article.findMany({ where: { type: 'MEDICAL_ARTICLE', status: 'PUBLISHED' }, take: 3, orderBy: { publishedAt: 'desc' }, include }),
     ])
@@ -345,6 +348,9 @@ export class ArticlesService implements OnModuleDestroy {
 
   async create(dto: CreateArticleDto) {
     const base = slugify(dto.slug || dto.title, { lower: true, strict: true, locale: 'es' })
+    // Los artículos médicos nunca ocupan slots editoriales del home de noticias.
+    // Defensa en profundidad: ignoramos cualquier relevance que llegue en el DTO.
+    const isMedical = dto.type === ArticleType.MEDICAL_ARTICLE
     const data = {
       type: dto.type,
       title: stripAllHtml(dto.title),
@@ -353,7 +359,9 @@ export class ArticlesService implements OnModuleDestroy {
       featuredImage: dto.featuredImage,
       authorName: dto.authorName ?? 'Reporte Médico',
       status: dto.status ?? ArticleStatus.DRAFT,
-      relevance: dto.relevance ?? 4,
+      // Médicos: siempre null. Noticias: respetamos null explícito ("Sin slot editorial"),
+      // y si no viene nada en el DTO, default 4 (Small Destacada).
+      relevance: isMedical ? null : (dto.relevance === undefined ? 4 : dto.relevance),
       ...(dto.publishedAt && { publishedAt: new Date(dto.publishedAt) }),
       tags: dto.tagIds?.length
         ? { create: dto.tagIds.map((tagId) => ({ tagId })) }
@@ -407,6 +415,14 @@ export class ArticlesService implements OnModuleDestroy {
     const { tagIds, sources, seoMetadata, slug: _slug, ...fields } = dto
 
     return this.prisma.$transaction(async (tx) => {
+      // Si el artículo es médico, fuerza relevance=null y omite la cascada:
+      // los artículos médicos no ocupan slots editoriales del home de noticias.
+      const existing = await tx.article.findUnique({
+        where: { id },
+        select: { type: true },
+      })
+      const isMedical = existing?.type === ArticleType.MEDICAL_ARTICLE
+
       // Diff de tags
       if (tagIds !== undefined) {
         const current = await tx.articleTag.findMany({
@@ -445,8 +461,9 @@ export class ArticlesService implements OnModuleDestroy {
         }
       }
 
-      // Aplicar cascada si el artículo será PUBLISHED y cambia de relevance o de estado
-      if (fields.relevance !== undefined || fields.status !== undefined) {
+      // Aplicar cascada si el artículo será PUBLISHED y cambia de relevance o de estado.
+      // Los artículos médicos no participan de la cascada (no tienen slot editorial).
+      if (!isMedical && (fields.relevance !== undefined || fields.status !== undefined)) {
         const current = await tx.article.findUnique({
           where: { id },
           select: { relevance: true, status: true },
@@ -473,7 +490,10 @@ export class ArticlesService implements OnModuleDestroy {
           featuredImage: fields.featuredImage,
           authorName: fields.authorName,
           ...(fields.status !== undefined && { status: fields.status }),
-          ...(fields.relevance !== undefined && { relevance: fields.relevance }),
+          // Médicos: siempre relevance=null. Noticias: solo si vino en el DTO.
+          ...(isMedical
+            ? { relevance: null }
+            : fields.relevance !== undefined && { relevance: fields.relevance }),
           ...(fields.publishedAt !== undefined && { publishedAt: new Date(fields.publishedAt) }),
           ...(seoMetadata !== undefined && {
             seoMetadata: {
@@ -498,15 +518,17 @@ export class ArticlesService implements OnModuleDestroy {
     const updated = await this.prisma.$transaction(async (tx) => {
       const current = await tx.article.findUnique({
         where: { id },
-        select: { relevance: true, status: true },
+        select: { relevance: true, status: true, type: true },
       })
       if (!current) throw new NotFoundException('Artículo no encontrado')
 
       const wasPublished = current.status === ArticleStatus.PUBLISHED
       const willBePublished = status === ArticleStatus.PUBLISHED
+      const isMedical = current.type === ArticleType.MEDICAL_ARTICLE
 
-      // Aplicar cascada solo al pasar de no-publicado a publicado
-      if (willBePublished && !wasPublished && current.relevance != null) {
+      // Aplicar cascada solo al pasar de no-publicado a publicado.
+      // Los artículos médicos no participan de la cascada.
+      if (!isMedical && willBePublished && !wasPublished && current.relevance != null) {
         await this.applyRelevanceCascade(tx, id, current.relevance)
       }
 
@@ -591,8 +613,18 @@ export class ArticlesService implements OnModuleDestroy {
     await this.makeRoomAtLevel(tx, targetRelevance, id)
   }
 
-  async setRelevance(id: string, relevance: number) {
+  async setRelevance(id: string, relevance: number | null) {
     return this.prisma.$transaction(async (tx) => {
+      // Los artículos médicos no pueden tener relevance: viven en su propia sección.
+      const existing = await tx.article.findUnique({ where: { id }, select: { type: true } })
+      if (existing?.type === ArticleType.MEDICAL_ARTICLE) {
+        return tx.article.update({ where: { id }, data: { relevance: null } })
+      }
+      // null = "Sin slot editorial": el artículo sigue publicado y accesible,
+      // pero desaparece del home. No requiere cascada (no entra a ningún slot).
+      if (relevance === null) {
+        return tx.article.update({ where: { id }, data: { relevance: null } })
+      }
       await this.applyRelevanceCascade(tx, id, relevance)
       return tx.article.update({ where: { id }, data: { relevance } })
     })
