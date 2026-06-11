@@ -12,6 +12,8 @@ import { AdminModule } from './admin/admin.module'
 import { CouncilMembersModule } from './council-members/council-members.module'
 import { AdsModule } from './ads/ads.module'
 // V2 — Guía Médica
+import { DoctorsModule } from './doctors/doctors.module'
+import { RevalidationModule } from './revalidation/revalidation.module'
 import { SpecialtiesModule } from './specialties/specialties.module'
 import { ClinicsModule } from './clinics/clinics.module'
 import { InsurancesModule } from './insurances/insurances.module'
@@ -37,6 +39,8 @@ import { CitiesModule } from './cities/cities.module'
     CouncilMembersModule,
     AdsModule,
     // V2 — Guía Médica
+    DoctorsModule,
+    RevalidationModule,
     SpecialtiesModule,
     ClinicsModule,
     InsurancesModule,
