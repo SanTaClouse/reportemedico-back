@@ -45,6 +45,14 @@ export class MediaController {
     return this.mediaService.uploadArticulos(file)
   }
 
+  /** Fotos y videos de médicos de la Guía Médica (admin) — V2 */
+  @Post('upload/medicos')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file', FILE_UPLOAD_OPTIONS))
+  uploadMedicos(@UploadedFile() file: Express.Multer.File) {
+    return this.mediaService.uploadMedicos(file)
+  }
+
   /** Fotos del Consejo Médico Editorial (admin) */
   @Post('upload/consejo')
   @UseGuards(JwtAuthGuard)

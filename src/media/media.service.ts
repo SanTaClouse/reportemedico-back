@@ -79,6 +79,12 @@ export class MediaService {
     return { url: result.secure_url as string }
   }
 
+  /** Fotos de médicos de la Guía Médica (admin) — V2. Solo devuelve URL. */
+  async uploadMedicos(file: Express.Multer.File) {
+    const result = await this.uploadToCloudinary(file, 'Reporte-Medico/Medicos')
+    return { url: result.secure_url as string }
+  }
+
   /** Upload para galerías de noticias (admin). Guarda en BD para poder asociar a artículos. */
   async uploadGaleria(file: Express.Multer.File, altText?: string) {
     const result = await this.uploadToCloudinary(file, 'Reporte-Medico/Galerias')
