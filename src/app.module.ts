@@ -11,6 +11,11 @@ import { PodcastEpisodesModule } from './podcast-episodes/podcast-episodes.modul
 import { AdminModule } from './admin/admin.module'
 import { CouncilMembersModule } from './council-members/council-members.module'
 import { AdsModule } from './ads/ads.module'
+// V2 — Guía Médica
+import { SpecialtiesModule } from './specialties/specialties.module'
+import { ClinicsModule } from './clinics/clinics.module'
+import { InsurancesModule } from './insurances/insurances.module'
+import { CitiesModule } from './cities/cities.module'
 
 @Module({
   imports: [
@@ -31,6 +36,11 @@ import { AdsModule } from './ads/ads.module'
     AdminModule,
     CouncilMembersModule,
     AdsModule,
+    // V2 — Guía Médica
+    SpecialtiesModule,
+    ClinicsModule,
+    InsurancesModule,
+    CitiesModule,
   ],
 })
 export class AppModule {}

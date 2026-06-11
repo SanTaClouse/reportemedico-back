@@ -15,7 +15,7 @@ datasource db {
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  password  String   // bcrypt hash
+  password  String // bcrypt hash
   role      Role     @default(ADMIN)
   name      String?
   isActive  Boolean  @default(true)
@@ -25,8 +25,9 @@ model User {
 
 enum Role {
   ADMIN
-  // DOCTOR    <- V2
-  // MODERATOR <- V2
+  // MODERATOR <- futuro
+  // ⚠️ NO agregar DOCTOR: los médicos NO usan User (auth local con bcrypt).
+  // Su identidad vive en Auth0 y se resuelve por Doctor.auth0Sub (ver docs/v2/01 §3 y 06).
 }
 
 // ─────────────────────────────────────────────────
@@ -35,41 +36,50 @@ enum Role {
 // ─────────────────────────────────────────────────
 
 model Article {
-  id             String        @id @default(uuid())
-  type           ArticleType
-  title          String
-  slug           String        @unique
-  excerpt        String?
-  content        String
+  id      String      @id @default(uuid())
+  type    ArticleType
+  title   String
+  slug    String      @unique
+  excerpt String?
+  content String
 
-  featuredImage  String?
+  featuredImage String?
 
-  authorName     String        @default("Reporte Médico")
-  authorPhoto    String?
-  authorEmail    String?
+  authorName      String  @default("Reporte Médico")
+  authorPhoto     String?
+  authorEmail     String? // destino del aviso "tu artículo fue publicado" (V2)
+  authorPhone     String? // solo uso interno del admin — nunca se renderiza públicamente
+  authorInstagram String? // solo uso interno del admin — nunca se renderiza públicamente
 
-  status         ArticleStatus @default(DRAFT)
-  relevance      Int?
+  // V2: artículos enviados por médicos logueados; si existe, el frontend
+  // renderiza los datos del perfil y linkea a la ficha (los campos author* quedan
+  // para el form público anónimo)
+  doctorId String?
+  doctor   Doctor? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
 
-  viewsCount     Int           @default(0)
+  status    ArticleStatus @default(DRAFT)
+  relevance Int?
 
-  publishedAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  viewsCount Int @default(0)
 
-  tags           ArticleTag[]
-  media          ArticleMedia[]
-  seoMetadata    SeoMetadata?
-  relatedFrom    RelatedArticle[] @relation("ArticleFrom")
-  relatedTo      RelatedArticle[] @relation("ArticleTo")
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tags                 ArticleTag[]
+  media                ArticleMedia[]
+  seoMetadata          SeoMetadata?
+  relatedFrom          RelatedArticle[]         @relation("ArticleFrom")
+  relatedTo            RelatedArticle[]         @relation("ArticleTo")
   sources              ArticleSource[]
-  suggestedSpecialties String[]        @default([])
+  suggestedSpecialties String[]                 @default([])
   search_vector        Unsupported("tsvector")?
 
   @@index([slug])
   @@index([status, type])
   @@index([relevance, status])
   @@index([publishedAt])
+  @@index([doctorId])
 }
 
 enum ArticleType {
@@ -89,14 +99,15 @@ enum ArticleStatus {
 // ─────────────────────────────────────────────────
 
 model Tag {
-  id          String          @id @default(uuid())
-  name        String          @unique
-  slug        String          @unique
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
   description String?
-  createdAt   DateTime        @default(now())
+  createdAt   DateTime @default(now())
 
   articles    ArticleTag[]
   subscribers SubscriberTag[]
+  specialties SpecialtyTag[] // V2: cruce noticias ↔ especialidades de la Guía Médica
 
   @@index([slug])
 }
@@ -121,7 +132,7 @@ model Subscriber {
   source    SubscriberSource
   createdAt DateTime         @default(now())
 
-  tags      SubscriberTag[]
+  tags SubscriberTag[]
 
   @@index([source])
   @@index([createdAt])
@@ -152,11 +163,11 @@ model Media {
   altText   String?
   width     Int?
   height    Int?
-  fileHash  String?  @unique  // SHA-256 del buffer — previene subidas duplicadas
-  folder    String?            // Contexto: Reporte-Medico/Media, Noticias, Ads…
+  fileHash  String?  @unique // SHA-256 del buffer — previene subidas duplicadas
+  folder    String? // Contexto: Reporte-Medico/Media, Noticias, Ads…
   createdAt DateTime @default(now())
 
-  articles  ArticleMedia[]
+  articles ArticleMedia[]
 }
 
 model ArticleMedia {
@@ -175,9 +186,9 @@ model ArticleMedia {
 // ─────────────────────────────────────────────────
 
 model SeoMetadata {
-  id              String  @id @default(uuid())
-  articleId       String  @unique
-  article         Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  articleId String  @unique
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
   metaTitle       String?
   metaDescription String?
@@ -252,13 +263,13 @@ model PodcastEpisode {
 // ─────────────────────────────────────────────────
 
 enum AdSlotDisplayMode {
-  SINGLE  // Un anuncio aleatorio por visita
-  STRIP   // Todos los anuncios en marquee continuo
+  SINGLE // Un anuncio aleatorio por visita
+  STRIP // Todos los anuncios en marquee continuo
 }
 
 model AdSlot {
   id          String             @id @default(uuid())
-  name        String             @unique  // ej: "banner_home_1"
+  name        String             @unique // ej: "banner_home_1"
   description String?
   isActive    Boolean            @default(true)
   displayMode AdSlotDisplayMode  @default(SINGLE)
@@ -296,16 +307,296 @@ model AdSlotAssignment {
 // ─────────────────────────────────────────────────
 
 model CouncilMember {
-  id          String   @id @default(uuid())
-  name        String
-  role        String
-  photo       String?
+  id         String   @id @default(uuid())
+  name       String
+  role       String
+  photo      String?
   profileUrl String?
-  isFeatured  Boolean  @default(false)
-  isVisible   Boolean  @default(true)
-  order       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isFeatured Boolean  @default(false)
+  isVisible  Boolean  @default(true)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([isVisible, order])
+}
+
+// ═════════════════════════════════════════════════
+// V2 — GUÍA MÉDICA (ver docs/v2/01-modelo-de-datos.md)
+// ═════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────
+// MÉDICOS
+// ─────────────────────────────────────────────────
+
+enum DoctorStatus {
+  DRAFT // creó cuenta Auth0 pero no completó/envió el wizard (habilita borrador + recordatorios)
+  PENDING // envió el wizard, espera aprobación del admin
+  PUBLISHED // visible en la guía
+  INACTIVE // desactivado por el admin
+}
+
+// ⚠️ PENDIENTE DE CONFIRMACIÓN CON EL CLIENTE (docs/v2/00 §7): si todos los
+// médicos pagan desde el día uno, este enum se elimina y los beneficios se
+// activan por médico. No construir UI de planes hasta confirmar.
+enum DoctorPlan {
+  BASIC // gratis: perfil + búsqueda + mapa
+  PREMIUM // pago (cobro manual): beneficios activos
+}
+
+model Doctor {
+  id            String       @id @default(uuid())
+  auth0Sub      String?      @unique // sub de Auth0; null si lo creó el admin y aún no reclamó la cuenta
+  slug          String       @unique // dra-maria-perez (SEO) — inmutable post-publicación
+  firstName     String
+  lastName      String
+  title         String? // "Dr." / "Dra."
+  email         String?      @unique // opcional: el admin puede crear perfiles sin email
+  phonePublic   String? // WhatsApp público (botón CTA)
+  phoneInternal String? // solo uso interno del admin
+  phoneOffice   String?
+  instagram     String?
+  bio           String?      @db.Text // contenido único SEO del perfil
+  photoUrl      String? // Cloudinary
+  videoUrl      String? // beneficio premium (Cloudinary / YouTube)
+  exequatur     String? // matrícula RD
+  isVerified    Boolean      @default(false) // badge ✓, activado manualmente por admin
+  languages     String[]     @default([]) // ["Español", "Inglés"]
+  telehealth    Boolean      @default(false) // modalidad teleconsulta
+  emailOptOut   Boolean      @default(false) // baja del digest de noticias; los transaccionales no se afectan
+  status        DoctorStatus @default(DRAFT)
+  plan          DoctorPlan   @default(BASIC)
+  planNotes     String? // notas del admin sobre cobro/beneficios entregados
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  specialties    DoctorSpecialty[]
+  clinics        DoctorClinic[]
+  insurances     DoctorInsurance[]
+  whatsappClicks WhatsAppClick[]
+  sessions       SessionLog[]
+  emails         EmailLog[]
+  reviews        Review[]
+  articles       Article[]
+  claimTokens    ClaimToken[]
+  benefits       DoctorBenefit[]
+
+  @@index([status])
+  @@index([status, createdAt]) // cola de pendientes y recordatorios de wizard
+}
+
+// ─────────────────────────────────────────────────
+// CATÁLOGOS CERRADOS (P3: solo los gestiona el admin)
+// ─────────────────────────────────────────────────
+
+model Specialty {
+  id             String  @id @default(uuid())
+  slug           String  @unique // cardiologia
+  name           String  @unique // Cardiología
+  schemaOrgValue String? // enum schema.org para JSON-LD (ej: "Cardiovascular"); null si no hay match limpio
+
+  doctors           DoctorSpecialty[]
+  tags              SpecialtyTag[]
+  programmaticPages ProgrammaticPageContent[]
+}
+
+model City {
+  id   String @id @default(uuid())
+  slug String @unique // santo-domingo
+  name String @unique
+
+  clinics           Clinic[]
+  programmaticPages ProgrammaticPageContent[]
+}
+
+model Clinic {
+  id        String  @id @default(uuid())
+  slug      String  @unique // clinica-abreu
+  name      String
+  address   String
+  cityId    String
+  city      City    @relation(fields: [cityId], references: [id])
+  latitude  Float
+  longitude Float
+  phone     String?
+
+  doctors DoctorClinic[]
+
+  @@index([cityId])
+  @@index([latitude, longitude]) // Haversine de "cerca de mí" (05 §4)
+}
+
+model Insurance {
+  id   String @id @default(uuid())
+  slug String @unique // ars-humano, senasa
+  name String @unique
+
+  doctors DoctorInsurance[]
+}
+
+// ─────────────────────────────────────────────────
+// RELACIONES MÉDICO ↔ CATÁLOGOS
+// ─────────────────────────────────────────────────
+
+model DoctorSpecialty {
+  doctorId    String
+  specialtyId String
+  order       Int       @default(0) // la primera (order 0) es la especialidad principal de la ficha (04 §1.0)
+  doctor      Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, specialtyId])
+}
+
+model DoctorClinic {
+  doctorId String
+  clinicId String
+  schedule String? // tanda: "Lunes a viernes 8:00–12:00"
+  doctor   Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  clinic   Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, clinicId])
+}
+
+model DoctorInsurance {
+  doctorId    String
+  insuranceId String
+  doctor      Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  insurance   Insurance @relation(fields: [insuranceId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, insuranceId])
+}
+
+// ─────────────────────────────────────────────────
+// CRUCE CON NOTICIAS V1 (tags ↔ especialidades)
+// ─────────────────────────────────────────────────
+
+model SpecialtyTag {
+  specialtyId String
+  tagId       String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([specialtyId, tagId])
+}
+
+// ─────────────────────────────────────────────────
+// ENGAGEMENT / MÉTRICAS (visibles solo para el admin en V2)
+// ─────────────────────────────────────────────────
+
+model WhatsAppClick {
+  id        String   @id @default(uuid())
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  source    String? // "profile" | "search-card" | "clinic-page"
+  createdAt DateTime @default(now())
+
+  @@index([doctorId, createdAt]) // counts de 30d del panel de engagement
+}
+
+model SessionLog {
+  id         String    @id @default(uuid())
+  doctorId   String
+  doctor     Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  viaEmailId String? // atribución: "entró desde el email X"
+  viaEmail   EmailLog? @relation(fields: [viaEmailId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+
+  @@index([doctorId, createdAt])
+}
+
+model EmailLog {
+  id       String   @id @default(uuid())
+  doctorId String
+  doctor   Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  type     String // "welcome" | "specialty-news" | "wizard-reminder"
+  token    String   @unique // token de atribución en los links
+  sentAt   DateTime @default(now())
+
+  clicks   EmailClick[]
+  sessions SessionLog[]
+
+  @@index([doctorId, sentAt])
+}
+
+model EmailClick {
+  id         String   @id @default(uuid())
+  emailLogId String
+  emailLog   EmailLog @relation(fields: [emailLogId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([emailLogId])
+}
+
+// ─────────────────────────────────────────────────
+// RECLAMO DE PERFIL (links de invitación — 06 §5)
+// ─────────────────────────────────────────────────
+
+model ClaimToken {
+  id        String    @id @default(uuid())
+  doctorId  String
+  doctor    Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([doctorId])
+}
+
+// ─────────────────────────────────────────────────
+// BENEFICIOS PREMIUM (checklist de entrega — 07 §3)
+// ─────────────────────────────────────────────────
+
+enum BenefitType {
+  REVISTA_DIGITAL
+  REVISTA_IMPRESA
+  FOTOGRAFIA
+  VIDEO
+  PODCAST // admite múltiples registros (varias invitaciones)
+  EVENTO // admite múltiples registros
+}
+
+model DoctorBenefit {
+  id          String      @id @default(uuid())
+  doctorId    String
+  doctor      Doctor      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  type        BenefitType
+  deliveredAt DateTime? // null = pendiente de entrega
+  note        String? // "Sesión 14/07 con fotógrafo X" / "Episodio #23"
+  createdAt   DateTime    @default(now())
+
+  @@index([doctorId])
+}
+
+// ─────────────────────────────────────────────────
+// TEXTO EDITORIAL DE PÁGINAS PROGRAMÁTICAS (03 §7 fase 2)
+// ─────────────────────────────────────────────────
+
+model ProgrammaticPageContent {
+  id          String    @id @default(uuid())
+  specialtyId String
+  cityId      String
+  introText   String    @db.Text
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+  city        City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([specialtyId, cityId])
+}
+
+// ─────────────────────────────────────────────────
+// RESEÑAS — preparada para V3, SIN UI en V2 (docs/v2/09)
+// ─────────────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(uuid())
+  doctorId   String
+  doctor     Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  rating     Int // 1–5
+  comment    String?  @db.Text
+  authorName String?
+  status     String   @default("PENDING") // moderación
+  createdAt  DateTime @default(now())
+
+  @@index([doctorId])
 }
