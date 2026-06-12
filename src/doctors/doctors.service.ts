@@ -33,14 +33,138 @@ export class DoctorsService {
   async findPublicBySlug(slug: string) {
     const doctor = await this.prisma.doctor.findUnique({
       where: { slug },
-      include: this.fullInclude,
+      include: {
+        ...this.fullInclude,
+        // Artículos del médico (04 §1.7) — solo publicados
+        articles: {
+          where: { status: 'PUBLISHED' },
+          orderBy: { publishedAt: 'desc' },
+          take: 4,
+          select: {
+            id: true, title: true, slug: true, excerpt: true,
+            featuredImage: true, publishedAt: true, type: true,
+          },
+        },
+      },
     })
     if (!doctor || doctor.status !== DoctorStatus.PUBLISHED) {
       throw new NotFoundException('Médico no encontrado')
     }
+    const related = await this.findRelated(doctor)
     // Los campos internos no salen al público
-    const { phoneInternal, planNotes, auth0Sub, email, ...publicDoctor } = doctor
-    return publicDoctor
+    const { phoneInternal, planNotes, auth0Sub, email, plan, ...publicDoctor } = doctor
+    return { ...publicDoctor, related }
+  }
+
+  /**
+   * Médicos relacionados (✅ confirmado por el cliente — 04 §1.9):
+   * misma especialidad principal + alguna ciudad en común, solo PUBLISHED, máx 4.
+   */
+  private async findRelated(doctor: {
+    id: string
+    specialties: { order: number; specialty: { id: string } }[]
+    clinics: { clinic: { city: { id: string } } }[]
+  }) {
+    const principal = doctor.specialties.find((s) => s.order === 0) ?? doctor.specialties[0]
+    const cityIds = [...new Set(doctor.clinics.map((c) => c.clinic.city.id))]
+    if (!principal || !cityIds.length) return []
+
+    const related = await this.prisma.doctor.findMany({
+      where: {
+        id: { not: doctor.id },
+        status: DoctorStatus.PUBLISHED,
+        specialties: { some: { specialtyId: principal.specialty.id } },
+        clinics: { some: { clinic: { cityId: { in: cityIds } } } },
+      },
+      include: this.fullInclude,
+      take: 4,
+    })
+    return related.map((d) => this.toPublicCard(d))
+  }
+
+  /**
+   * Listado público para programáticas y página de clínica: solo PUBLISHED,
+   * orden confirmado por el cliente (05 §3): premium → verificado →
+   * completitud → rotación estable con semilla diaria.
+   * El plan NO se expone en la respuesta (el plan es invisible al paciente, 04).
+   */
+  async findPublicList(params: { specialtySlug?: string; citySlug?: string; clinicSlug?: string }) {
+    const { specialtySlug, citySlug, clinicSlug } = params
+    const doctors = await this.prisma.doctor.findMany({
+      where: {
+        status: DoctorStatus.PUBLISHED,
+        ...(specialtySlug ? { specialties: { some: { specialty: { slug: specialtySlug } } } } : {}),
+        ...(citySlug ? { clinics: { some: { clinic: { city: { slug: citySlug } } } } } : {}),
+        ...(clinicSlug ? { clinics: { some: { clinic: { slug: clinicSlug } } } } : {}),
+      },
+      include: this.fullInclude,
+    })
+
+    const seed = new Date().toISOString().slice(0, 10) // rotación estable por día
+    const ranked = doctors
+      .map((d) => ({
+        doctor: d,
+        premium: d.plan === 'PREMIUM' ? 1 : 0,
+        verified: d.isVerified ? 1 : 0,
+        completeness: [d.photoUrl, d.bio, d.phonePublic, d.insurances.length > 0, d.clinics.some((c) => c.schedule)]
+          .filter(Boolean).length,
+        rotation: this.stableHash(d.id + seed),
+      }))
+      .sort(
+        (a, b) =>
+          b.premium - a.premium ||
+          b.verified - a.verified ||
+          b.completeness - a.completeness ||
+          a.rotation - b.rotation,
+      )
+
+    return ranked.map((r) => this.toPublicCard(r.doctor))
+  }
+
+  /** Card pública: solo los campos que el paciente ve (sin plan ni internos) */
+  private toPublicCard(d: {
+    id: string; slug: string; title: string | null; firstName: string; lastName: string
+    photoUrl: string | null; isVerified: boolean; telehealth: boolean; languages: string[]
+    phonePublic: string | null; bio: string | null
+    specialties: { order: number; specialty: { slug: string; name: string } }[]
+    clinics: { schedule: string | null; clinic: { slug: string; name: string; address: string; latitude: number; longitude: number; city: { slug: string; name: string } } }[]
+    insurances: { insurance: { slug: string; name: string } }[]
+  }) {
+    return {
+      id: d.id,
+      slug: d.slug,
+      title: d.title,
+      firstName: d.firstName,
+      lastName: d.lastName,
+      photoUrl: d.photoUrl,
+      isVerified: d.isVerified,
+      telehealth: d.telehealth,
+      languages: d.languages,
+      phonePublic: d.phonePublic,
+      excerpt: d.bio ? d.bio.slice(0, 160) : null,
+      specialties: d.specialties
+        .sort((a, b) => a.order - b.order)
+        .map((s) => ({ slug: s.specialty.slug, name: s.specialty.name })),
+      clinics: d.clinics.map((c) => ({
+        slug: c.clinic.slug,
+        name: c.clinic.name,
+        address: c.clinic.address,
+        latitude: c.clinic.latitude,
+        longitude: c.clinic.longitude,
+        schedule: c.schedule,
+        city: c.clinic.city,
+      })),
+      insurances: d.insurances.map((i) => ({ slug: i.insurance.slug, name: i.insurance.name })),
+    }
+  }
+
+  private stableHash(input: string): number {
+    let hash = 0
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash << 5) - hash + input.charCodeAt(i)
+      hash |= 0
+    }
+    return Math.abs(hash)
   }
 
   /**

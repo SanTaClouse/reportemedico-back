@@ -25,6 +25,32 @@ export class SpecialtiesService {
     return specialty
   }
 
+  /**
+   * Noticias V1 relacionadas con la especialidad vía SpecialtyTag (03 §6):
+   * alimentan la ficha del médico y las páginas programáticas.
+   */
+  async findArticles(slug: string, limit = 4) {
+    const specialty = await this.prisma.specialty.findUnique({
+      where: { slug },
+      include: { tags: { select: { tagId: true } } },
+    })
+    if (!specialty) throw new NotFoundException('Especialidad no encontrada')
+    const tagIds = specialty.tags.map((t) => t.tagId)
+    if (!tagIds.length) return []
+    return this.prisma.article.findMany({
+      where: {
+        status: 'PUBLISHED',
+        tags: { some: { tagId: { in: tagIds } } },
+      },
+      orderBy: { publishedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, title: true, slug: true, excerpt: true,
+        featuredImage: true, publishedAt: true, type: true, authorName: true,
+      },
+    })
+  }
+
   async create(dto: CreateSpecialtyDto) {
     const slug = slugify(dto.name, { lower: true, strict: true, locale: 'es' })
     try {

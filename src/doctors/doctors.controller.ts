@@ -24,7 +24,21 @@ export class DoctorsController {
     return this.doctorsService.getIndexableCombinations()
   }
 
-  // Ficha pública (solo PUBLISHED; el resto → 404)
+  // Listado público ordenado para programáticas y página de clínica
+  @Get('public-list')
+  findPublicList(
+    @Query('specialty') specialty?: string,
+    @Query('city') city?: string,
+    @Query('clinic') clinic?: string,
+  ) {
+    return this.doctorsService.findPublicList({
+      specialtySlug: specialty,
+      citySlug: city,
+      clinicSlug: clinic,
+    })
+  }
+
+  // Ficha pública (solo PUBLISHED; el resto → 404) — incluye médicos relacionados
   @Get('slug/:slug')
   findPublic(@Param('slug') slug: string) {
     return this.doctorsService.findPublicBySlug(slug)

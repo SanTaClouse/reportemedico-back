@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { SpecialtiesService } from './specialties.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CreateSpecialtyDto } from './dto/create-specialty.dto'
@@ -11,6 +11,12 @@ export class SpecialtiesController {
   @Get()
   findAll() {
     return this.specialtiesService.findAll()
+  }
+
+  // Noticias V1 de la especialidad (cruce SpecialtyTag) — antes de :slug
+  @Get(':slug/articles')
+  findArticles(@Param('slug') slug: string, @Query('limit') limit?: string) {
+    return this.specialtiesService.findArticles(slug, limit ? Math.min(Number(limit), 12) : 4)
   }
 
   @Get(':slug')
