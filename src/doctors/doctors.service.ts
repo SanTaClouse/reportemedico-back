@@ -121,6 +121,156 @@ export class DoctorsService {
     return ranked.map((r) => this.toPublicCard(r.doctor))
   }
 
+  /**
+   * Búsqueda pública (05 §2, §8): filtros componibles, SIEMPRE sobre PUBLISHED.
+   * Con geolocalización: ordena por distancia mínima a las clínicas del médico
+   * (Haversine; con catálogos de cientos de filas se resuelve en memoria sobre
+   * el set ya filtrado). Sin geo: el orden confirmado (premium → verificado →
+   * completitud → rotación diaria).
+   */
+  async search(params: {
+    insurance?: string
+    specialty?: string
+    city?: string
+    clinic?: string
+    q?: string
+    telehealth?: boolean
+    lat?: number
+    lng?: number
+    page?: number
+    limit?: number
+  }) {
+    const { insurance, specialty, city, clinic, q, telehealth, lat, lng } = params
+    const page = Math.max(1, params.page ?? 1)
+    const limit = Math.min(50, Math.max(1, params.limit ?? 20))
+
+    const doctors = await this.prisma.doctor.findMany({
+      where: {
+        status: DoctorStatus.PUBLISHED,
+        ...(insurance ? { insurances: { some: { insurance: { slug: insurance } } } } : {}),
+        ...(specialty ? { specialties: { some: { specialty: { slug: specialty } } } } : {}),
+        ...(city ? { clinics: { some: { clinic: { city: { slug: city } } } } } : {}),
+        ...(clinic ? { clinics: { some: { clinic: { slug: clinic } } } } : {}),
+        ...(telehealth ? { telehealth: true } : {}),
+      },
+      include: this.fullInclude,
+    })
+
+    // Búsqueda por nombre insensible a tildes ("perez" matchea "Pérez") —
+    // mismo patrón en memoria que tags.checkExists de V1; con cientos de
+    // médicos no justifica unaccent/tsvector todavía
+    const normalizedQ = q ? this.stripAccents(q) : null
+    const filtered = normalizedQ
+      ? doctors.filter((d) =>
+          this.stripAccents(`${d.firstName} ${d.lastName}`).includes(normalizedQ),
+        )
+      : doctors
+
+    const useGeo = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)
+    const seed = new Date().toISOString().slice(0, 10)
+
+    const ranked = filtered
+      .map((d) => ({
+        doctor: d,
+        premium: d.plan === 'PREMIUM' ? 1 : 0,
+        verified: d.isVerified ? 1 : 0,
+        completeness: [d.photoUrl, d.bio, d.phonePublic, d.insurances.length > 0, d.clinics.some((c) => c.schedule)]
+          .filter(Boolean).length,
+        rotation: this.stableHash(d.id + seed),
+        distanceKm: useGeo
+          ? Math.min(
+              ...d.clinics.map((c) => this.haversineKm(lat!, lng!, c.clinic.latitude, c.clinic.longitude)),
+              Infinity,
+            )
+          : null,
+      }))
+      .sort((a, b) => {
+        // Con geo, la distancia mínima manda; el resto desempata (05 §3)
+        if (useGeo && a.distanceKm !== b.distanceKm) return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
+        return (
+          b.premium - a.premium ||
+          b.verified - a.verified ||
+          b.completeness - a.completeness ||
+          a.rotation - b.rotation
+        )
+      })
+
+    const total = ranked.length
+    const items = ranked.slice((page - 1) * limit, page * limit).map((r) => ({
+      ...this.toPublicCard(r.doctor),
+      distanceKm: r.distanceKm !== null && isFinite(r.distanceKm) ? Math.round(r.distanceKm * 10) / 10 : null,
+    }))
+
+    return { items, total, page, limit }
+  }
+
+  /** Typeahead (05 §2): médicos publicados + clínicas con médicos publicados */
+  async suggest(q: string) {
+    const query = this.stripAccents(q.trim())
+    if (query.length < 2) return []
+
+    // Filtro insensible a tildes en memoria (escala actual: cientos de filas)
+    const [allDoctors, allClinics] = await Promise.all([
+      this.prisma.doctor.findMany({
+        where: { status: DoctorStatus.PUBLISHED },
+        select: {
+          slug: true, title: true, firstName: true, lastName: true, photoUrl: true,
+          specialties: {
+            orderBy: { order: 'asc' }, take: 1,
+            select: { specialty: { select: { name: true } } },
+          },
+        },
+      }),
+      this.prisma.clinic.findMany({
+        where: { doctors: { some: { doctor: { status: DoctorStatus.PUBLISHED } } } },
+        select: { slug: true, name: true, city: { select: { name: true } } },
+      }),
+    ])
+
+    const doctors = allDoctors
+      .filter((d) => this.stripAccents(`${d.firstName} ${d.lastName}`).includes(query))
+      .slice(0, 5)
+    const clinics = allClinics
+      .filter((c) => this.stripAccents(c.name).includes(query))
+      .slice(0, 3)
+
+    return [
+      ...doctors.map((d) => ({
+        type: 'doctor' as const,
+        slug: d.slug,
+        label: `${d.title ?? ''} ${d.firstName} ${d.lastName}`.trim(),
+        sublabel: d.specialties[0]?.specialty.name ?? null,
+        photoUrl: d.photoUrl,
+      })),
+      ...clinics.map((c) => ({
+        type: 'clinic' as const,
+        slug: c.slug,
+        label: c.name,
+        sublabel: c.city.name,
+        photoUrl: null,
+      })),
+    ]
+  }
+
+  /** Quita acentos y pasa a minúsculas (mismo helper que tags de V1) */
+  private stripAccents(str: string): string {
+    return str
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+  }
+
+  private haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const toRad = (deg: number) => (deg * Math.PI) / 180
+    const dLat = toRad(lat2 - lat1)
+    const dLng = toRad(lng2 - lng1)
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
   /** Card pública: solo los campos que el paciente ve (sin plan ni internos) */
   private toPublicCard(d: {
     id: string; slug: string; title: string | null; firstName: string; lastName: string

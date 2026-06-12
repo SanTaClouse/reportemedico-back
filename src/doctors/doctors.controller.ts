@@ -24,6 +24,38 @@ export class DoctorsController {
     return this.doctorsService.getIndexableCombinations()
   }
 
+  // Búsqueda pública con filtros componibles (05 §2) — siempre PUBLISHED
+  @Get('search')
+  search(
+    @Query('seguro') insurance?: string,
+    @Query('especialidad') specialty?: string,
+    @Query('ciudad') city?: string,
+    @Query('clinica') clinic?: string,
+    @Query('q') q?: string,
+    @Query('modalidad') modalidad?: string,
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
+  ) {
+    return this.doctorsService.search({
+      insurance,
+      specialty,
+      city,
+      clinic,
+      q,
+      telehealth: modalidad === 'teleconsulta',
+      lat: lat ? parseFloat(lat) : undefined,
+      lng: lng ? parseFloat(lng) : undefined,
+      page,
+    })
+  }
+
+  // Typeahead: médicos + clínicas (05 §2)
+  @Get('suggest')
+  suggest(@Query('q') q = '') {
+    return this.doctorsService.suggest(q)
+  }
+
   // Listado público ordenado para programáticas y página de clínica
   @Get('public-list')
   findPublicList(
