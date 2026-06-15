@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common'
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common'
 import { PassportStrategy } from '@nestjs/passport'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 import { ConfigService } from '@nestjs/config'
@@ -29,21 +29,19 @@ export class Auth0Strategy extends PassportStrategy(Strategy, 'auth0') {
   constructor(config: ConfigService) {
     const rawIssuer = config.get<string>('AUTH0_ISSUER_BASE_URL')?.trim()
     const audience = config.get<string>('AUTH0_AUDIENCE')?.trim()
-    if (!rawIssuer || !audience) {
-      // Falla explícita en arranque si falta config: mejor que tokens "válidos" silenciosos
-      throw new Error('AUTH0_ISSUER_BASE_URL y AUTH0_AUDIENCE son obligatorios para doctor-auth')
-    }
-    // Normalización defensiva: tolera el dominio sin protocolo y sin barra final.
-    // El issuer de Auth0 SIEMPRE es https://<dominio>/ (con barra), y el token lo
-    // trae así — por eso garantizamos protocolo + barra para que coincida y para
-    // que la URL del JWKS sea válida.
-    const withProtocol = /^https?:\/\//i.test(rawIssuer) ? rawIssuer : `https://${rawIssuer}`
+    const configured = Boolean(rawIssuer && audience)
+
+    // Degradación elegante: si falta la config NO se cae todo el backend.
+    // Se construye con un issuer dummy (URL válida pero irresoluble) → los
+    // tokens fallan la validación (401) y el resto de la API sigue operativa.
+    const baseIssuer = configured ? (rawIssuer as string) : 'https://auth0-no-configurado.invalid'
+    const withProtocol = /^https?:\/\//i.test(baseIssuer) ? baseIssuer : `https://${baseIssuer}`
     const issuerUrl = withProtocol.endsWith('/') ? withProtocol : `${withProtocol}/`
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      audience,
+      audience: audience ?? 'audiencia-no-configurada',
       issuer: issuerUrl,
       algorithms: ['RS256'],
       secretOrKeyProvider: passportJwtSecret({
@@ -53,6 +51,13 @@ export class Auth0Strategy extends PassportStrategy(Strategy, 'auth0') {
         jwksUri: `${issuerUrl}.well-known/jwks.json`,
       }),
     })
+
+    if (!configured) {
+      new Logger(Auth0Strategy.name).error(
+        'doctor-auth DESHABILITADO: faltan AUTH0_ISSUER_BASE_URL y/o AUTH0_AUDIENCE. ' +
+          'El login de médicos rechazará todos los tokens hasta configurarlas.',
+      )
+    }
   }
 
   validate(payload: Record<string, unknown>): Auth0Payload {
