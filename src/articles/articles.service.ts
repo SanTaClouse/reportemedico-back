@@ -420,14 +420,19 @@ export class ArticlesService implements OnModuleDestroy {
   async update(id: string, dto: UpdateArticleDto) {
     const { tagIds, sources, seoMetadata, slug: _slug, ...fields } = dto
 
-    return this.prisma.$transaction(async (tx) => {
+    let justPublished = false
+    const updated = await this.prisma.$transaction(async (tx) => {
       // Si el artículo es médico, fuerza relevance=null y omite la cascada:
       // los artículos médicos no ocupan slots editoriales del home de noticias.
       const existing = await tx.article.findUnique({
         where: { id },
-        select: { type: true },
+        select: { type: true, status: true },
       })
       const isMedical = existing?.type === ArticleType.MEDICAL_ARTICLE
+      // Transición a PUBLISHED desde el editor → aviso de aprobación al autor.
+      // Vale también para artículos médicos (que son los que traen authorEmail).
+      justPublished =
+        existing?.status !== ArticleStatus.PUBLISHED && fields.status === ArticleStatus.PUBLISHED
 
       // Diff de tags
       if (tagIds !== undefined) {
@@ -518,6 +523,19 @@ export class ArticlesService implements OnModuleDestroy {
         },
       })
     })
+
+    // Aviso de aprobación cuando el editor publica (mismo trigger que setStatus,
+    // 08 §1). Fire-and-forget: un fallo de email nunca rompe la publicación.
+    if (justPublished && updated.authorEmail) {
+      void this.emailService.sendArticleApproved(
+        updated.authorEmail,
+        updated.authorName,
+        updated.title,
+        updated.slug,
+      )
+    }
+
+    return updated
   }
 
   async setStatus(id: string, status: ArticleStatus) {

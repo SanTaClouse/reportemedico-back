@@ -87,14 +87,36 @@ export function articleReceivedTemplate(authorName: string, articleTitle: string
 
 export function articleApprovedTemplate(authorName: string, articleTitle: string, slug: string, frontendUrl: string) {
   const url = `${frontendUrl}/articulos/${slug}`
+  const waText = encodeURIComponent(`Escribí este artículo en Reporte Médico: ${articleTitle} ${url}`)
+  const whatsappShare = `https://wa.me/?text=${waText}`
+
+  // Banda dorada de felicitación
+  const congratsBanner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+    <tr><td style="background:${GOLD};border-radius:10px;padding:18px 20px;text-align:center;">
+      <span style="font-size:28px;">🎉</span>
+      <div style="margin-top:4px;color:${NAVY};font-size:18px;font-weight:bold;">¡Aprobamos tu artículo!</div>
+    </td></tr>
+  </table>`
+
+  // Caja de compartir
+  const shareBox = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 0;">
+    <tr><td style="background:#f4f5f7;border-radius:10px;padding:18px 20px;">
+      <p style="margin:0 0 12px;font-size:14px;font-weight:bold;color:${NAVY};">Compártelo con tus pacientes y colegas</p>
+      <a href="${whatsappShare}" style="display:inline-block;padding:10px 22px;background:#25D366;color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;border-radius:8px;">Compartir por WhatsApp</a>
+      <p style="margin:12px 0 0;font-size:13px;color:#666;line-height:1.5;">
+        Desde la página de tu artículo puedes compartirlo en <strong>Instagram</strong>, WhatsApp y más con un toque (botón “Compartir”).
+      </p>
+    </td></tr>
+  </table>`
+
   return {
-    subject: '¡Tu artículo fue publicado! — Reporte Médico',
+    subject: '¡Aprobamos tu artículo! 🎉 — Reporte Médico',
     html: emailLayout(
-      h2('Tu artículo ya está publicado') +
+      congratsBanner +
         p(`Hola <strong>${authorName}</strong>,`) +
-        p(`Tu artículo <strong>“${articleTitle}”</strong> fue aprobado por nuestro equipo editorial y ya está disponible en Reporte Médico.`) +
-        ctaButton('Ver mi artículo', url) +
-        p('Gracias por contribuir con contenido de calidad para la comunidad médica dominicana.'),
+        p(`Tu artículo <strong>“${articleTitle}”</strong> pasó la revisión editorial y ya está publicado en Reporte Médico. ¡Gracias por aportar contenido de calidad para la comunidad médica dominicana!`) +
+        ctaButton('Ver mi artículo publicado', url) +
+        shareBox,
       { preheader: `“${articleTitle}” ya está publicado`, frontendUrl },
     ),
   }
