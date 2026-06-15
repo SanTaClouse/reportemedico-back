@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import { Throttle } from '@nestjs/throttler'
 import { MediaService } from './media.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { DoctorAuthGuard } from '../doctor-auth/doctor-auth.guard'
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 const MAX_FILE_SIZE_MB = 15
@@ -50,6 +51,14 @@ export class MediaController {
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor('file', FILE_UPLOAD_OPTIONS))
   uploadMedicos(@UploadedFile() file: Express.Multer.File) {
+    return this.mediaService.uploadMedicos(file)
+  }
+
+  /** Foto propia del médico (sesión Auth0) — sube su foto desde /mi-cuenta */
+  @Post('upload/mi-foto')
+  @UseGuards(DoctorAuthGuard)
+  @UseInterceptors(FileInterceptor('file', FILE_UPLOAD_OPTIONS))
+  uploadMiFoto(@UploadedFile() file: Express.Multer.File) {
     return this.mediaService.uploadMedicos(file)
   }
 
