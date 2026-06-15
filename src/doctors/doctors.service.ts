@@ -461,6 +461,66 @@ export class DoctorsService {
     }
   }
 
+  /** Candidato a reclamo por email (B2, 06 §5): perfil sin dueño con el mismo email verificado */
+  async findClaimCandidate(email: string | undefined, emailVerified: boolean | undefined) {
+    if (!email || !emailVerified) return null
+    const candidate = await this.prisma.doctor.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' }, auth0Sub: null },
+      include: this.fullInclude,
+    })
+    if (!candidate) return null
+    // No exponemos campos internos al front del médico
+    const { phoneInternal, planNotes, ...safe } = candidate
+    return safe
+  }
+
+  /** Reclamo por link de invitación (B1, 06 §5): liga el auth0Sub al Doctor del token */
+  async claimByLink(auth0Sub: string, token: string) {
+    const claim = await this.prisma.claimToken.findUnique({ where: { token }, include: { doctor: true } })
+    if (!claim) throw new NotFoundException('El link de invitación no es válido')
+    if (claim.usedAt) throw new ConflictException('Este link de invitación ya fue usado')
+    if (claim.expiresAt < new Date()) throw new ConflictException('Este link de invitación expiró')
+    if (claim.doctor.auth0Sub) throw new ConflictException('Este perfil ya fue reclamado')
+    await this.ensureNoOwnProfile(auth0Sub)
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.claimToken.update({ where: { token }, data: { usedAt: new Date() } })
+      const linked = await tx.doctor.update({
+        where: { id: claim.doctorId },
+        data: { auth0Sub },
+        include: this.fullInclude,
+      })
+      // Otros tokens vigentes del mismo perfil quedan inservibles
+      await tx.claimToken.updateMany({
+        where: { doctorId: claim.doctorId, usedAt: null },
+        data: { usedAt: new Date() },
+      })
+      return linked
+    })
+  }
+
+  /** Reclamo por email verificado (B2): liga el perfil sin dueño cuyo email coincide */
+  async claimByEmail(auth0Sub: string, email: string | undefined, emailVerified: boolean | undefined) {
+    if (!email || !emailVerified) {
+      throw new BadRequestException('Necesitas un email verificado para reclamar un perfil')
+    }
+    const candidate = await this.prisma.doctor.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' }, auth0Sub: null },
+    })
+    if (!candidate) throw new NotFoundException('No encontramos un perfil con tu email')
+    await this.ensureNoOwnProfile(auth0Sub)
+    return this.prisma.doctor.update({
+      where: { id: candidate.id },
+      data: { auth0Sub },
+      include: this.fullInclude,
+    })
+  }
+
+  private async ensureNoOwnProfile(auth0Sub: string) {
+    const own = await this.prisma.doctor.findUnique({ where: { auth0Sub }, select: { id: true } })
+    if (own) throw new ConflictException('Tu cuenta ya tiene un perfil asociado')
+  }
+
   /** Envía el perfil propio a revisión (DRAFT → PENDING) + avisa al admin (07 §8) */
   async submitOwn(auth0Sub: string) {
     const doctor = await this.prisma.doctor.findUnique({ where: { auth0Sub } })

@@ -2,9 +2,13 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } f
 import { Throttle, SkipThrottle } from '@nestjs/throttler'
 import { ArticlesService } from './articles.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { DoctorAuthGuard } from '../doctor-auth/doctor-auth.guard'
+import { Auth0User } from '../doctor-auth/current-doctor.decorator'
+import type { Auth0Payload } from '../doctor-auth/auth0.strategy'
 import { CreateArticleDto } from './dto/create-article.dto'
 import { UpdateArticleDto } from './dto/update-article.dto'
 import { SubmitPublicDto } from './dto/submit-public.dto'
+import { SubmitAsDoctorDto } from './dto/submit-as-doctor.dto'
 import { SetStatusDto } from './dto/set-status.dto'
 import { SetRelevanceDto } from './dto/set-relevance.dto'
 import { SpecialtyActionDto } from './dto/specialty-action.dto'
@@ -76,6 +80,14 @@ export class ArticlesController {
     return this.articlesService.findPublished(+page || 1, +limit || 10)
   }
 
+  /** Mis artículos enviados (médico logueado) — DEBE ir antes de :slug */
+  @SkipThrottle()
+  @Get('mine')
+  @UseGuards(DoctorAuthGuard)
+  findMine(@Auth0User() user: Auth0Payload) {
+    return this.articlesService.findMine(user.sub)
+  }
+
   @Get(':slug')
   findOne(@Param('slug') slug: string) {
     return this.articlesService.findBySlug(slug)
@@ -90,6 +102,16 @@ export class ArticlesController {
   @Throttle({ default: { limit: 5, ttl: 3600000 } }) // 5 envíos / hora
   submitPublic(@Body() dto: SubmitPublicDto) {
     return this.articlesService.submitPublic(dto)
+  }
+
+  // ─── Médico logueado: envío autenticado (sesión Auth0) ────────────────────
+
+  /** Envío autenticado: autoría derivada del perfil del médico */
+  @Post('submit-as-doctor')
+  @UseGuards(DoctorAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 3600000 } })
+  submitAsDoctor(@Auth0User() user: Auth0Payload, @Body() dto: SubmitAsDoctorDto) {
+    return this.articlesService.submitAsDoctor(user.sub, dto)
   }
 
   // ─── RUTAS ADMIN ──────────────────────────────────────

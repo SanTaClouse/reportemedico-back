@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common'
+import { Injectable, NotFoundException, ForbiddenException, OnModuleDestroy } from '@nestjs/common'
 import { Prisma, ArticleType, ArticleStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import slugify from 'slugify'
 import { CreateArticleDto } from './dto/create-article.dto'
 import { UpdateArticleDto } from './dto/update-article.dto'
 import { SubmitPublicDto } from './dto/submit-public.dto'
+import { SubmitAsDoctorDto } from './dto/submit-as-doctor.dto'
 import { sanitizeHtml, stripAllHtml } from '../utils/sanitize.util'
 import { SubscribersService } from '../subscribers/subscribers.service'
 import { EmailService } from '../email/email.service'
@@ -732,6 +733,76 @@ export class ArticlesService implements OnModuleDestroy {
     }
 
     return article
+  }
+
+  // ─── Envío autenticado (médico logueado) — 06 §6 ──────────────────────────
+
+  /** Crea un artículo PENDING con autoría derivada del perfil del médico */
+  async submitAsDoctor(auth0Sub: string, dto: SubmitAsDoctorDto) {
+    const doctor = await this.prisma.doctor.findUnique({ where: { auth0Sub } })
+    if (!doctor) throw new NotFoundException('Primero completa tu perfil de médico')
+    if (doctor.status === 'INACTIVE') {
+      throw new ForbiddenException('Tu perfil no está activo; contacta a Reporte Médico')
+    }
+
+    const authorName = `${doctor.title ?? ''} ${doctor.firstName} ${doctor.lastName}`.trim()
+    const base = slugify(dto.title, { lower: true, strict: true, locale: 'es' })
+    const filteredSources = dto.sources?.filter((s) => !!s.title) ?? []
+    const data = {
+      title: stripAllHtml(dto.title),
+      excerpt: dto.excerpt ? stripAllHtml(dto.excerpt) : dto.excerpt,
+      content: sanitizeHtml(dto.content),
+      featuredImage: dto.featuredImage,
+      authorName,
+      authorEmail: doctor.email ?? null,
+      authorPhoto: doctor.photoUrl ?? null,
+      doctorId: doctor.id, // vincula el artículo al perfil (se renderiza con sus datos)
+      type: ArticleType.MEDICAL_ARTICLE,
+      status: ArticleStatus.PENDING,
+      suggestedSpecialties: dto.suggestedSpecialties ?? [],
+      tags: dto.tagIds?.length ? { create: dto.tagIds.map((tagId) => ({ tagId })) } : undefined,
+      sources: filteredSources.length
+        ? { create: filteredSources.map((s) => ({ title: s.title, url: s.url ?? null, order: s.order ?? 0 })) }
+        : undefined,
+    }
+
+    let article: Awaited<ReturnType<typeof this.prisma.article.create>> | null = null
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const slug = attempt === 0 ? base : `${base}-${attempt}`
+      try {
+        article = await this.prisma.article.create({ data: { ...data, slug } })
+        break
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          (e.meta as any)?.target?.includes('slug')
+        ) {
+          continue
+        }
+        throw e
+      }
+    }
+    if (!article) throw new Error('No se pudo generar un slug único')
+
+    if (doctor.email) {
+      void this.emailService.sendArticleReceived(doctor.email, authorName, article.title)
+    }
+    return article
+  }
+
+  /** Artículos propios del médico logueado (cualquier estado) */
+  async findMine(auth0Sub: string) {
+    const doctor = await this.prisma.doctor.findUnique({ where: { auth0Sub }, select: { id: true } })
+    if (!doctor) return []
+    return this.prisma.article.findMany({
+      where: { doctorId: doctor.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, title: true, slug: true, status: true, type: true,
+        createdAt: true, publishedAt: true,
+      },
+    })
   }
 
   // ─── GALERÍA DE FOTOS ────────────────────────────────────────────────────────

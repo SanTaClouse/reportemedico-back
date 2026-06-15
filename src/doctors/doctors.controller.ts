@@ -21,12 +21,14 @@ export class DoctorsController {
 
   // ─── Área del médico (sesión Auth0) — antes de las rutas con :id ───────────
 
-  /** Perfil propio (o null si todavía no existe) */
+  /** Perfil propio; si no existe, busca un candidato a reclamo por email (B2) */
   @Get('me')
   @UseGuards(DoctorAuthGuard)
   async findOwn(@Auth0User() user: Auth0Payload) {
     const doctor = await this.doctorsService.findOwn(user.sub)
-    return { doctor }
+    if (doctor) return { doctor, claimCandidate: null }
+    const claimCandidate = await this.doctorsService.findClaimCandidate(user.email, user.emailVerified)
+    return { doctor: null, claimCandidate }
   }
 
   /** Crear/guardar el perfil propio (borrador) */
@@ -41,6 +43,20 @@ export class DoctorsController {
   @UseGuards(DoctorAuthGuard)
   submitOwn(@Auth0User() user: Auth0Payload) {
     return this.doctorsService.submitOwn(user.sub)
+  }
+
+  /** Reclamar un perfil con el link de invitación (B1) */
+  @Post('me/claim-link')
+  @UseGuards(DoctorAuthGuard)
+  claimByLink(@Auth0User() user: Auth0Payload, @Body('token') token: string) {
+    return this.doctorsService.claimByLink(user.sub, token)
+  }
+
+  /** Reclamar el perfil que coincide con mi email verificado (B2) */
+  @Post('me/claim-email')
+  @UseGuards(DoctorAuthGuard)
+  claimByEmail(@Auth0User() user: Auth0Payload) {
+    return this.doctorsService.claimByEmail(user.sub, user.email, user.emailVerified)
   }
 
   // ─── Público ────────────────────────────────────────────────────────────────
