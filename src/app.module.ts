@@ -13,6 +13,7 @@ import { CouncilMembersModule } from './council-members/council-members.module'
 import { AdsModule } from './ads/ads.module'
 import { EmailModule } from './email/email.module'
 // V2 — Guía Médica
+import { DoctorAuthModule } from './doctor-auth/doctor-auth.module'
 import { DoctorsModule } from './doctors/doctors.module'
 import { EngagementModule } from './engagement/engagement.module'
 import { RevalidationModule } from './revalidation/revalidation.module'
@@ -43,6 +44,7 @@ import { ProgrammaticContentModule } from './programmatic-content/programmatic-c
     AdsModule,
     EmailModule,
     // V2 — Guía Médica
+    DoctorAuthModule,
     DoctorsModule,
     EngagementModule,
     RevalidationModule,
