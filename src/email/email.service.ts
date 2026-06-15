@@ -6,6 +6,7 @@ import {
   articleReceivedTemplate,
   articleApprovedTemplate,
   articleRejectedTemplate,
+  doctorPendingAdminTemplate,
   testTemplate,
 } from './email.templates'
 
@@ -93,6 +94,18 @@ export class EmailService {
   async sendArticleRejected(to: string, authorName: string, articleTitle: string): Promise<void> {
     const { subject, html } = articleRejectedTemplate(authorName, articleTitle, this.frontendUrl)
     await this.send(to, subject, html)
+  }
+
+  // ─── Aviso al admin de nuevo médico pendiente (07 §8) ──────────────────────
+
+  async sendDoctorPendingToAdmin(doctorName: string): Promise<void> {
+    const adminEmail = this.config.get<string>('ADMIN_EMAIL')
+    if (!adminEmail) {
+      this.logger.warn('ADMIN_EMAIL sin configurar — no se avisa el nuevo pendiente')
+      return
+    }
+    const { subject, html } = doctorPendingAdminTemplate(doctorName, this.frontendUrl)
+    await this.send(adminEmail, subject, html)
   }
 
   // ─── Diagnóstico (endpoint admin) ──────────────────────────────────────────

@@ -1,10 +1,13 @@
 import {
-  Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards,
+  Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards,
   ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common'
 import { DoctorStatus } from '@prisma/client'
 import { DoctorsService } from './doctors.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { DoctorAuthGuard } from '../doctor-auth/doctor-auth.guard'
+import { Auth0User } from '../doctor-auth/current-doctor.decorator'
+import type { Auth0Payload } from '../doctor-auth/auth0.strategy'
 import { CreateDoctorDto } from './dto/create-doctor.dto'
 import { UpdateDoctorDto } from './dto/update-doctor.dto'
 import {
@@ -15,6 +18,30 @@ import {
 @Controller('doctors')
 export class DoctorsController {
   constructor(private doctorsService: DoctorsService) {}
+
+  // ─── Área del médico (sesión Auth0) — antes de las rutas con :id ───────────
+
+  /** Perfil propio (o null si todavía no existe) */
+  @Get('me')
+  @UseGuards(DoctorAuthGuard)
+  async findOwn(@Auth0User() user: Auth0Payload) {
+    const doctor = await this.doctorsService.findOwn(user.sub)
+    return { doctor }
+  }
+
+  /** Crear/guardar el perfil propio (borrador) */
+  @Put('me')
+  @UseGuards(DoctorAuthGuard)
+  upsertOwn(@Auth0User() user: Auth0Payload, @Body() dto: UpdateDoctorDto) {
+    return this.doctorsService.upsertOwn(user.sub, user.email, dto)
+  }
+
+  /** Enviar el perfil propio a revisión (DRAFT → PENDING) */
+  @Post('me/submit')
+  @UseGuards(DoctorAuthGuard)
+  submitOwn(@Auth0User() user: Auth0Payload) {
+    return this.doctorsService.submitOwn(user.sub)
+  }
 
   // ─── Público ────────────────────────────────────────────────────────────────
 

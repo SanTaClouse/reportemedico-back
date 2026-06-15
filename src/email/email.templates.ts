@@ -137,6 +137,22 @@ export function articleRejectedTemplate(authorName: string, articleTitle: string
   }
 }
 
+// ─── Aviso al admin: nuevo médico pendiente de aprobación ───────────────────
+
+export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: string) {
+  const url = `${frontendUrl}/admin/guia-medica/pendientes`
+  return {
+    subject: `Nuevo médico pendiente de aprobación: ${doctorName}`,
+    html: emailLayout(
+      h2('Nuevo perfil para revisar') +
+        p(`<strong>${doctorName}</strong> completó su registro en la Guía Médica y envió su perfil para aprobación.`) +
+        ctaButton('Revisar en el panel', url) +
+        p('Revisa los datos, normaliza la clínica si hace falta y publica el perfil.'),
+      { preheader: `${doctorName} espera aprobación`, frontendUrl },
+    ),
+  }
+}
+
 // ─── Prueba de configuración (solo dev/admin) ───────────────────────────────
 
 export function testTemplate(frontendUrl: string) {

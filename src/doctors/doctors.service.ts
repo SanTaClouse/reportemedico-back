@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common'
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common'
 import { Prisma, DoctorStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { RevalidationService } from '../revalidation/revalidation.service'
+import { EmailService } from '../email/email.service'
 import { stripAllHtml } from '../utils/sanitize.util'
 import slugify from 'slugify'
 import { randomBytes } from 'crypto'
@@ -19,6 +20,7 @@ export class DoctorsService {
   constructor(
     private prisma: PrismaService,
     private revalidation: RevalidationService,
+    private emailService: EmailService,
   ) {}
 
   private readonly fullInclude = {
@@ -403,6 +405,80 @@ export class DoctorsService {
   async countPending() {
     const count = await this.prisma.doctor.count({ where: { status: DoctorStatus.PENDING } })
     return { count }
+  }
+
+  // ─── Área del médico (self-service, guard 'auth0' — 06 §4, §6) ─────────────
+
+  /** Perfil propio del médico logueado (por auth0Sub); null si aún no existe */
+  findOwn(auth0Sub: string) {
+    return this.prisma.doctor.findUnique({
+      where: { auth0Sub },
+      include: { ...this.fullInclude, _count: { select: { articles: true } } },
+    })
+  }
+
+  /**
+   * Crea (DRAFT) o actualiza el perfil propio. El primer guardado crea el
+   * registro con auth0Sub + email del token; los siguientes reusan update().
+   */
+  async upsertOwn(auth0Sub: string, tokenEmail: string | undefined, dto: UpdateDoctorDto) {
+    const existing = await this.prisma.doctor.findUnique({ where: { auth0Sub }, select: { id: true } })
+    if (existing) {
+      return this.update(existing.id, dto)
+    }
+    const firstName = dto.firstName?.trim()
+    const lastName = dto.lastName?.trim()
+    if (!firstName || !lastName) {
+      throw new BadRequestException('Nombre y apellido son obligatorios para crear tu perfil')
+    }
+    const { specialtyIds, clinics, insuranceIds, ...fields } = dto
+    const data = this.sanitizeScalars(fields)
+    const slug = await this.generateSlug(dto.title, firstName, lastName)
+    try {
+      return await this.prisma.doctor.create({
+        data: {
+          ...data,
+          firstName: stripAllHtml(firstName),
+          lastName: stripAllHtml(lastName),
+          auth0Sub,
+          email: tokenEmail ?? data.email ?? undefined,
+          slug,
+          status: DoctorStatus.DRAFT,
+          specialties: specialtyIds?.length
+            ? { create: specialtyIds.map((specialtyId, order) => ({ specialtyId, order })) }
+            : undefined,
+          clinics: clinics?.length
+            ? { create: clinics.map((c) => ({ clinicId: c.clinicId, schedule: c.schedule })) }
+            : undefined,
+          insurances: insuranceIds?.length
+            ? { create: insuranceIds.map((insuranceId) => ({ insuranceId })) }
+            : undefined,
+        },
+        include: this.fullInclude,
+      })
+    } catch (e) {
+      this.handlePrismaError(e, dto.email)
+    }
+  }
+
+  /** Envía el perfil propio a revisión (DRAFT → PENDING) + avisa al admin (07 §8) */
+  async submitOwn(auth0Sub: string) {
+    const doctor = await this.prisma.doctor.findUnique({ where: { auth0Sub } })
+    if (!doctor) throw new NotFoundException('Todavía no tienes un perfil creado')
+    if (doctor.status === DoctorStatus.PUBLISHED) {
+      throw new ConflictException('Tu perfil ya está publicado')
+    }
+    if (!doctor.firstName || !doctor.lastName) {
+      throw new BadRequestException('Completa al menos tu nombre y apellido antes de enviar')
+    }
+    const updated = await this.prisma.doctor.update({
+      where: { auth0Sub },
+      data: { status: DoctorStatus.PENDING },
+      include: this.fullInclude,
+    })
+    const name = `${updated.title ?? ''} ${updated.firstName} ${updated.lastName}`.trim()
+    void this.emailService.sendDoctorPendingToAdmin(name) // fire-and-forget
+    return updated
   }
 
   // ─── Admin: creación manual (06 §5 — la vía comercial) ─────────────────────
