@@ -7,6 +7,7 @@ import { UpdateArticleDto } from './dto/update-article.dto'
 import { SubmitPublicDto } from './dto/submit-public.dto'
 import { sanitizeHtml, stripAllHtml } from '../utils/sanitize.util'
 import { SubscribersService } from '../subscribers/subscribers.service'
+import { EmailService } from '../email/email.service'
 
 // ─── Constantes editoriales ───────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export class ArticlesService implements OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private subscribersService: SubscribersService,
+    private emailService: EmailService,
   ) {
     // Fix #2 — flush de views cada 30 s
     this.flushTimer = setInterval(() => void this.flushViews(), 30_000)
@@ -519,6 +521,7 @@ export class ArticlesService implements OnModuleDestroy {
   }
 
   async setStatus(id: string, status: ArticleStatus) {
+    let justPublished = false
     const updated = await this.prisma.$transaction(async (tx) => {
       const current = await tx.article.findUnique({
         where: { id },
@@ -529,6 +532,7 @@ export class ArticlesService implements OnModuleDestroy {
       const wasPublished = current.status === ArticleStatus.PUBLISHED
       const willBePublished = status === ArticleStatus.PUBLISHED
       const isMedical = current.type === ArticleType.MEDICAL_ARTICLE
+      justPublished = willBePublished && !wasPublished
 
       // Aplicar cascada solo al pasar de no-publicado a publicado.
       // Los artículos médicos no participan de la cascada.
@@ -545,8 +549,16 @@ export class ArticlesService implements OnModuleDestroy {
       })
     })
 
-    // TODO: notificación al autor por email (pendiente — implementar con dominio verificado)
-    // El authorEmail queda guardado en el artículo para que el admin notifique manualmente
+    // Aviso al autor: "tu artículo fue aprobado y publicado" (08 §1).
+    // Fire-and-forget: el envío nunca bloquea ni rompe la publicación.
+    if (justPublished && updated.authorEmail) {
+      void this.emailService.sendArticleApproved(
+        updated.authorEmail,
+        updated.authorName,
+        updated.title,
+        updated.slug,
+      )
+    }
 
     return updated
   }
@@ -697,7 +709,8 @@ export class ArticlesService implements OnModuleDestroy {
           dto.tagIds ?? [],
         )
       } catch { /* ignorar */ }
-      // TODO: email de confirmación de recepción (pendiente — implementar con dominio verificado)
+      // Aviso de recepción (08 §1) — fire-and-forget, no bloquea el envío
+      void this.emailService.sendArticleReceived(dto.authorEmail, dto.authorName, article.title)
     }
 
     return article
