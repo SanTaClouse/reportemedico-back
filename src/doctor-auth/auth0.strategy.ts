@@ -27,13 +27,18 @@ const EMAIL_VERIFIED_CLAIM = 'https://reportemedico.com/email_verified'
 @Injectable()
 export class Auth0Strategy extends PassportStrategy(Strategy, 'auth0') {
   constructor(config: ConfigService) {
-    const issuer = config.get<string>('AUTH0_ISSUER_BASE_URL') // ej: https://xxx.us.auth0.com
-    const audience = config.get<string>('AUTH0_AUDIENCE')
-    if (!issuer || !audience) {
+    const rawIssuer = config.get<string>('AUTH0_ISSUER_BASE_URL')?.trim()
+    const audience = config.get<string>('AUTH0_AUDIENCE')?.trim()
+    if (!rawIssuer || !audience) {
       // Falla explícita en arranque si falta config: mejor que tokens "válidos" silenciosos
       throw new Error('AUTH0_ISSUER_BASE_URL y AUTH0_AUDIENCE son obligatorios para doctor-auth')
     }
-    const issuerUrl = issuer.endsWith('/') ? issuer : `${issuer}/`
+    // Normalización defensiva: tolera el dominio sin protocolo y sin barra final.
+    // El issuer de Auth0 SIEMPRE es https://<dominio>/ (con barra), y el token lo
+    // trae así — por eso garantizamos protocolo + barra para que coincida y para
+    // que la URL del JWKS sea válida.
+    const withProtocol = /^https?:\/\//i.test(rawIssuer) ? rawIssuer : `https://${rawIssuer}`
+    const issuerUrl = withProtocol.endsWith('/') ? withProtocol : `${withProtocol}/`
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
