@@ -19,6 +19,7 @@ import { SpecialtiesModule } from './specialties/specialties.module'
 import { ClinicsModule } from './clinics/clinics.module'
 import { InsurancesModule } from './insurances/insurances.module'
 import { CitiesModule } from './cities/cities.module'
+import { ProgrammaticContentModule } from './programmatic-content/programmatic-content.module'
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { CitiesModule } from './cities/cities.module'
     ClinicsModule,
     InsurancesModule,
     CitiesModule,
+    ProgrammaticContentModule,
   ],
 })
 export class AppModule {}

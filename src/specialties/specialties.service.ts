@@ -90,7 +90,7 @@ export class SpecialtiesService {
     if (!specialty) throw new NotFoundException('Especialidad no encontrada')
     if (specialty._count.doctors > 0) {
       throw new ConflictException(
-        `No se puede eliminar: ${specialty._count.doctors} médico(s) tienen esta especialidad. Reasignalos primero.`,
+        `No se puede eliminar: ${specialty._count.doctors} médico(s) tienen esta especialidad. Reasígnalos primero.`,
       )
     }
     return this.prisma.specialty.delete({ where: { id } })

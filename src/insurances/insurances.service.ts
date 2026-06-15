@@ -56,7 +56,7 @@ export class InsurancesService {
     if (!insurance) throw new NotFoundException('Seguro no encontrado')
     if (insurance._count.doctors > 0) {
       throw new ConflictException(
-        `No se puede eliminar: ${insurance._count.doctors} médico(s) aceptan este seguro. Reasignalos primero.`,
+        `No se puede eliminar: ${insurance._count.doctors} médico(s) aceptan este seguro. Reasígnalos primero.`,
       )
     }
     return this.prisma.insurance.delete({ where: { id } })

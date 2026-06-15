@@ -72,4 +72,15 @@ export class SubmitPublicDto {
   @IsOptional()
   @IsEmail()
   authorEmail?: string
+
+  // V2 (06 §6bis): solo uso interno del admin — nunca se renderiza públicamente
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  authorPhone?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  authorInstagram?: string
 }

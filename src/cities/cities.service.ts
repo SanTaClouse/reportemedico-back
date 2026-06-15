@@ -59,7 +59,7 @@ export class CitiesService {
     if (!city) throw new NotFoundException('Ciudad no encontrada')
     if (city._count.clinics > 0) {
       throw new ConflictException(
-        `No se puede eliminar: ${city._count.clinics} clínica(s) pertenecen a esta ciudad. Reasignalas primero.`,
+        `No se puede eliminar: ${city._count.clinics} clínica(s) pertenecen a esta ciudad. Reasígnalas primero.`,
       )
     }
     return this.prisma.city.delete({ where: { id } })

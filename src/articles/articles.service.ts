@@ -648,6 +648,9 @@ export class ArticlesService implements OnModuleDestroy {
       featuredImage: dto.featuredImage,
       authorName: stripAllHtml(dto.authorName),
       authorEmail: dto.authorEmail ?? null,
+      // V2: contacto interno del autor (no público) — el admin los ve en la ficha
+      authorPhone: dto.authorPhone ? stripAllHtml(dto.authorPhone) : null,
+      authorInstagram: dto.authorInstagram ? stripAllHtml(dto.authorInstagram) : null,
       type: ArticleType.MEDICAL_ARTICLE,
       status: ArticleStatus.PENDING,
       suggestedSpecialties: dto.suggestedSpecialties ?? [],
@@ -794,6 +797,22 @@ export class ArticlesService implements OnModuleDestroy {
       create: { articleId, tagId: tag.id },
       update: {},
     })
+
+    // V2 (02 §3): si el tag corresponde a una especialidad del catálogo, enlazarlos
+    // vía SpecialtyTag — así el artículo alimenta el cruce de contenido de la guía
+    // (noticias en la ficha y en las páginas de especialidad, 03 §6). Aditivo: si
+    // no hay especialidad equivalente, el flujo de tags de V1 sigue igual.
+    const specialties = await this.prisma.specialty.findMany({ select: { id: true, name: true } })
+    const matchedSpecialty = specialties.find(
+      (s) => this.stripAccents(s.name) === this.stripAccents(tag.name),
+    )
+    if (matchedSpecialty) {
+      await this.prisma.specialtyTag.upsert({
+        where: { specialtyId_tagId: { specialtyId: matchedSpecialty.id, tagId: tag.id } },
+        create: { specialtyId: matchedSpecialty.id, tagId: tag.id },
+        update: {},
+      })
+    }
 
     const updated = (article.suggestedSpecialties as string[]).filter(
       (s) => s.toLowerCase() !== specialtyName.toLowerCase(),

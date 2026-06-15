@@ -83,7 +83,7 @@ export class ClinicsService {
     if (!clinic) throw new NotFoundException('Clínica no encontrada')
     if (clinic._count.doctors > 0) {
       throw new ConflictException(
-        `No se puede eliminar: ${clinic._count.doctors} médico(s) atienden en esta clínica. Reasignalos primero.`,
+        `No se puede eliminar: ${clinic._count.doctors} médico(s) atienden en esta clínica. Reasígnalos primero.`,
       )
     }
     return this.prisma.clinic.delete({ where: { id } })
