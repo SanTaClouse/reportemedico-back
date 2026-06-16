@@ -13,6 +13,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:seed:guia": "ts-node prisma/seed-guia-medica.ts",
+    "prisma:seed:catalogos": "ts-node prisma/seed-guia-catalogos.ts",
     "prisma:backfill:specialty-tags": "ts-node prisma/backfill-specialty-tags.ts"
   },
   "dependencies": {
