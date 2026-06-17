@@ -127,6 +127,13 @@ export class DoctorsController {
     return this.doctorsService.countPending()
   }
 
+  // Panel de engagement del admin (07 §7)
+  @Get('engagement')
+  @UseGuards(JwtAuthGuard)
+  getEngagement() {
+    return this.doctorsService.getEngagement()
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard)
   findAll(

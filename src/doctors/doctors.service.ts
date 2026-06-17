@@ -407,6 +407,47 @@ export class DoctorsService {
     return { count }
   }
 
+  /**
+   * Tabla de engagement del admin (07 §7): una fila por médico con última
+   * conexión, sesiones y clics de WhatsApp (30d y total), y artículos.
+   */
+  async getEngagement() {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const [doctors, clicks30, sessions30] = await Promise.all([
+      this.prisma.doctor.findMany({
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, slug: true, title: true, firstName: true, lastName: true,
+          plan: true, status: true,
+          _count: { select: { articles: true, whatsappClicks: true, sessions: true } },
+          sessions: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+        },
+      }),
+      this.prisma.whatsAppClick.groupBy({
+        by: ['doctorId'], where: { createdAt: { gte: since } }, _count: { _all: true },
+      }),
+      this.prisma.sessionLog.groupBy({
+        by: ['doctorId'], where: { createdAt: { gte: since } }, _count: { _all: true },
+      }),
+    ])
+    const clickMap = new Map(clicks30.map((c) => [c.doctorId, c._count._all]))
+    const sessMap = new Map(sessions30.map((s) => [s.doctorId, s._count._all]))
+
+    return doctors.map((d) => ({
+      id: d.id,
+      slug: d.slug,
+      name: `${d.title ?? ''} ${d.firstName} ${d.lastName}`.trim(),
+      plan: d.plan,
+      status: d.status,
+      lastSession: d.sessions[0]?.createdAt ?? null,
+      sessions30d: sessMap.get(d.id) ?? 0,
+      sessionsTotal: d._count.sessions,
+      whatsappClicks30d: clickMap.get(d.id) ?? 0,
+      whatsappClicksTotal: d._count.whatsappClicks,
+      articles: d._count.articles,
+    }))
+  }
+
   // ─── Área del médico (self-service, guard 'auth0' — 06 §4, §6) ─────────────
 
   /** Perfil propio del médico logueado (por auth0Sub); null si aún no existe */
@@ -644,6 +685,15 @@ export class DoctorsService {
     if (doctor.status === DoctorStatus.PUBLISHED || pathsBefore.length) {
       void this.revalidation.revalidateDoctorPaths(id, pathsBefore)
     }
+
+    // Email de bienvenida al aprobar el perfil (08 §1) — solo en la transición
+    // a PUBLISHED y si el médico tiene email. Fire-and-forget.
+    const justPublished = existing.status !== DoctorStatus.PUBLISHED && doctor.status === DoctorStatus.PUBLISHED
+    if (justPublished && doctor.email) {
+      const name = `${doctor.title ?? ''} ${doctor.firstName} ${doctor.lastName}`.trim()
+      void this.emailService.sendDoctorWelcome(doctor.email, name, doctor.slug)
+    }
+
     return doctor
   }
 

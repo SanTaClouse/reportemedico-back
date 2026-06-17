@@ -137,6 +137,28 @@ export function articleRejectedTemplate(authorName: string, articleTitle: string
   }
 }
 
+// ─── Bienvenida al médico (perfil aprobado y publicado) ─────────────────────
+
+export function doctorWelcomeTemplate(doctorName: string, slug: string, frontendUrl: string) {
+  const profileUrl = `${frontendUrl}/medico/${slug}`
+  const accountUrl = `${frontendUrl}/mi-cuenta`
+  return {
+    subject: '¡Tu perfil ya está publicado en la Guía Médica! 🩺',
+    html: emailLayout(
+      h2('¡Bienvenido a la Guía Médica!') +
+        p(`Hola <strong>${doctorName}</strong>,`) +
+        p('Tu perfil fue aprobado por nuestro equipo y ya está publicado en Reporte Médico. Desde ahora los pacientes pueden encontrarte en las búsquedas por seguro, especialidad y ciudad, y contactarte directo por WhatsApp.') +
+        ctaButton('Ver mi perfil', profileUrl) +
+        p('Desde tu cuenta puedes editar tus datos cuando quieras y enviar artículos a la revista sin recargar tu información.') +
+        p(
+          `<a href="${accountUrl}" style="color:${NAVY};font-weight:bold;">Ir a mi cuenta</a> · ` +
+            '¿Quieres los beneficios Premium (revista, fotografía profesional, video, podcast)? Responde este correo y te contamos.',
+        ),
+      { preheader: 'Tu perfil ya está online', frontendUrl },
+    ),
+  }
+}
+
 // ─── Aviso al admin: nuevo médico pendiente de aprobación ───────────────────
 
 export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: string) {

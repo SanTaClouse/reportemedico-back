@@ -7,6 +7,7 @@ import {
   articleApprovedTemplate,
   articleRejectedTemplate,
   doctorPendingAdminTemplate,
+  doctorWelcomeTemplate,
   testTemplate,
 } from './email.templates'
 
@@ -93,6 +94,13 @@ export class EmailService {
 
   async sendArticleRejected(to: string, authorName: string, articleTitle: string): Promise<void> {
     const { subject, html } = articleRejectedTemplate(authorName, articleTitle, this.frontendUrl)
+    await this.send(to, subject, html)
+  }
+
+  // ─── Bienvenida al médico al publicar su perfil (08 §1) ────────────────────
+
+  async sendDoctorWelcome(to: string, doctorName: string, slug: string): Promise<void> {
+    const { subject, html } = doctorWelcomeTemplate(doctorName, slug, this.frontendUrl)
     await this.send(to, subject, html)
   }
 
