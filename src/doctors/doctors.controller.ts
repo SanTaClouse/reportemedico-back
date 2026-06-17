@@ -134,6 +134,13 @@ export class DoctorsController {
     return this.doctorsService.getEngagement()
   }
 
+  // Médicos publicados que editaron su identidad y esperan re-verificación (06 §7)
+  @Get('reverify')
+  @UseGuards(JwtAuthGuard)
+  findReverify() {
+    return this.doctorsService.findNeedingReverify()
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard)
   findAll(

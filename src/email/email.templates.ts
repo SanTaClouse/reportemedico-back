@@ -175,6 +175,22 @@ export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: stri
   }
 }
 
+// ─── Aviso al admin: médico publicado editó su identidad (re-verificar) ─────
+
+export function doctorReverifyAdminTemplate(doctorName: string, frontendUrl: string) {
+  const url = `${frontendUrl}/admin/guia-medica/pendientes`
+  return {
+    subject: `Re-verificar identidad: ${doctorName}`,
+    html: emailLayout(
+      h2('Un médico publicado editó su identidad') +
+        p(`<strong>${doctorName}</strong> cambió su nombre, título o exequátur desde su cuenta. Su perfil sigue publicado, pero el sello ✓ Verificado quedó en pausa hasta que confirmes sus datos.`) +
+        ctaButton('Revisar y re-verificar', url) +
+        p('Abre su ficha, confirma el exequátur y reactiva el badge para que vuelva a aparecer verificado.'),
+      { preheader: `${doctorName} cambió datos de identidad`, frontendUrl },
+    ),
+  }
+}
+
 // ─── Prueba de configuración (solo dev/admin) ───────────────────────────────
 
 export function testTemplate(frontendUrl: string) {

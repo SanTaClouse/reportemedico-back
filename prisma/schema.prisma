@@ -361,6 +361,7 @@ model Doctor {
   videoUrl      String? // beneficio premium (Cloudinary / YouTube)
   exequatur     String? // matrícula RD
   isVerified    Boolean      @default(false) // badge ✓, activado manualmente por admin
+  needsReverify Boolean      @default(false) // el médico editó su identidad estando publicado → re-verificar (06 §7)
   languages     String[]     @default([]) // ["Español", "Inglés"]
   telehealth    Boolean      @default(false) // modalidad teleconsulta
   emailOptOut   Boolean      @default(false) // baja del digest de noticias; los transaccionales no se afectan

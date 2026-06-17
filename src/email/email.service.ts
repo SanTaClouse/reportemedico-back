@@ -7,6 +7,7 @@ import {
   articleApprovedTemplate,
   articleRejectedTemplate,
   doctorPendingAdminTemplate,
+  doctorReverifyAdminTemplate,
   doctorWelcomeTemplate,
   testTemplate,
 } from './email.templates'
@@ -113,6 +114,18 @@ export class EmailService {
       return
     }
     const { subject, html } = doctorPendingAdminTemplate(doctorName, this.frontendUrl)
+    await this.send(adminEmail, subject, html)
+  }
+
+  // ─── Aviso al admin: médico publicado editó su identidad (06 §7) ───────────
+
+  async sendDoctorReverifyToAdmin(doctorName: string): Promise<void> {
+    const adminEmail = this.config.get<string>('ADMIN_EMAIL')
+    if (!adminEmail) {
+      this.logger.warn('ADMIN_EMAIL sin configurar — no se avisa la re-verificación')
+      return
+    }
+    const { subject, html } = doctorReverifyAdminTemplate(doctorName, this.frontendUrl)
     await this.send(adminEmail, subject, html)
   }
 

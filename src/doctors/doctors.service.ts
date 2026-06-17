@@ -54,7 +54,7 @@ export class DoctorsService {
     }
     const related = await this.findRelated(doctor)
     // Los campos internos no salen al público
-    const { phoneInternal, planNotes, auth0Sub, email, plan, ...publicDoctor } = doctor
+    const { phoneInternal, planNotes, auth0Sub, email, plan, needsReverify, ...publicDoctor } = doctor
     return { ...publicDoctor, related }
   }
 
@@ -401,10 +401,22 @@ export class DoctorsService {
     return doctor
   }
 
-  /** Conteo para el badge del nav del admin (07 §8) */
+  /** Conteo para el badge del nav del admin (07 §8): pendientes + re-verificaciones */
   async countPending() {
-    const count = await this.prisma.doctor.count({ where: { status: DoctorStatus.PENDING } })
-    return { count }
+    const [count, reverifyCount] = await Promise.all([
+      this.prisma.doctor.count({ where: { status: DoctorStatus.PENDING } }),
+      this.prisma.doctor.count({ where: { needsReverify: true } }),
+    ])
+    return { count, reverifyCount }
+  }
+
+  /** Médicos publicados que editaron su identidad y esperan re-verificación (06 §7) */
+  findNeedingReverify() {
+    return this.prisma.doctor.findMany({
+      where: { needsReverify: true },
+      include: this.fullInclude,
+      orderBy: { updatedAt: 'desc' },
+    })
   }
 
   /**
@@ -465,7 +477,8 @@ export class DoctorsService {
   async upsertOwn(auth0Sub: string, tokenEmail: string | undefined, dto: UpdateDoctorDto) {
     const existing = await this.prisma.doctor.findUnique({ where: { auth0Sub }, select: { id: true } })
     if (existing) {
-      return this.update(existing.id, dto)
+      // selfEdit: dispara la re-verificación si cambia la identidad estando publicado (06 §7)
+      return this.update(existing.id, dto, { selfEdit: true })
     }
     const firstName = dto.firstName?.trim()
     const lastName = dto.lastName?.trim()
@@ -617,7 +630,7 @@ export class DoctorsService {
 
   // ─── Admin: edición (slug inmutable) ────────────────────────────────────────
 
-  async update(id: string, dto: UpdateDoctorDto) {
+  async update(id: string, dto: UpdateDoctorDto, opts: { selfEdit?: boolean } = {}) {
     const existing = await this.prisma.doctor.findUnique({ where: { id } })
     if (!existing) throw new NotFoundException('Médico no encontrado')
 
@@ -630,6 +643,16 @@ export class DoctorsService {
 
     const { specialtyIds, clinics, insuranceIds, ...fields } = dto
     const data = this.sanitizeScalars(fields)
+
+    // Re-verificación (06 §7): si el propio médico edita su identidad (nombre,
+    // apellido, título o exequátur) estando PUBLISHED, se cae el sello ✓ y
+    // queda marcado para que el admin re-verifique. La ficha sigue publicada
+    // (SEO-first, P1) — solo pierde el badge hasta la confirmación del admin.
+    const triggersReverify =
+      opts.selfEdit === true &&
+      existing.status === DoctorStatus.PUBLISHED &&
+      this.identityChanged(existing, data)
+    const reverifyData = triggersReverify ? { isVerified: false, needsReverify: true } : {}
 
     try {
       const doctor = await this.prisma.$transaction(async (tx) => {
@@ -651,16 +674,37 @@ export class DoctorsService {
             data: insuranceIds.map((insuranceId) => ({ doctorId: id, insuranceId })),
           })
         }
-        return tx.doctor.update({ where: { id }, data, include: this.fullInclude })
+        return tx.doctor.update({ where: { id }, data: { ...data, ...reverifyData }, include: this.fullInclude })
       })
 
       if (doctor.status === DoctorStatus.PUBLISHED) {
         void this.revalidation.revalidateDoctorPaths(id, pathsBefore)
       }
+      // Aviso al admin de que un médico publicado editó su identidad (fire-and-forget)
+      if (triggersReverify) {
+        const name = `${doctor.title ?? ''} ${doctor.firstName} ${doctor.lastName}`.trim()
+        void this.emailService.sendDoctorReverifyToAdmin(name)
+      }
       return doctor
     } catch (e) {
       this.handlePrismaError(e, dto.email)
     }
+  }
+
+  /** ¿Cambió algún campo de identidad (nombre, apellido, título, exequátur)? (06 §7) */
+  private identityChanged(
+    existing: { firstName: string; lastName: string; title: string | null; exequatur: string | null },
+    data: { firstName?: string; lastName?: string; title?: string; exequatur?: string },
+  ): boolean {
+    const norm = (v?: string | null) => (v ?? '').trim().toLowerCase()
+    const pairs: [string | undefined, string | null][] = [
+      [data.firstName, existing.firstName],
+      [data.lastName, existing.lastName],
+      [data.title, existing.title],
+      [data.exequatur, existing.exequatur],
+    ]
+    // Solo cuenta si el campo vino en el payload (undefined = "no tocar")
+    return pairs.some(([incoming, current]) => incoming !== undefined && norm(incoming) !== norm(current))
   }
 
   // ─── Admin: estado, plan, verificación ──────────────────────────────────────
@@ -715,7 +759,11 @@ export class DoctorsService {
     await this.ensureExists(id)
     const doctor = await this.prisma.doctor.update({
       where: { id },
-      data: { isVerified: dto.isVerified, ...(dto.exequatur !== undefined ? { exequatur: dto.exequatur } : {}) },
+      data: {
+        isVerified: dto.isVerified,
+        needsReverify: false, // el admin revisó la identidad → se limpia el pedido de re-verificación (06 §7)
+        ...(dto.exequatur !== undefined ? { exequatur: dto.exequatur } : {}),
+      },
       include: this.fullInclude,
     })
     if (doctor.status === DoctorStatus.PUBLISHED) {
