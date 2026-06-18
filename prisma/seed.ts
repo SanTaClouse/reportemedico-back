@@ -91,6 +91,7 @@ async function main() {
     { name: 'banner_home_3', description: 'Home — después de Actualidad' },
     { name: 'banner_home_4', description: 'Home — después de Artículos Médicos' },
     { name: 'banner_home_5', description: 'Home — después del Podcast' },
+    { name: 'banner_home_6', description: 'Home — después de Ediciones Impresas' },
   ]
   for (const slot of adSlots) {
     await prisma.adSlot.upsert({
