@@ -12,7 +12,7 @@ import { CreateDoctorDto } from './dto/create-doctor.dto'
 import { UpdateDoctorDto } from './dto/update-doctor.dto'
 import {
   UpdateDoctorStatusDto, UpdateDoctorPlanDto, UpdateDoctorVerificationDto,
-  CreateDoctorBenefitDto, UpdateDoctorBenefitDto,
+  CreateDoctorBenefitDto, UpdateDoctorBenefitDto, MergeDoctorsDto,
 } from './dto/doctor-admin.dtos'
 
 @Controller('doctors')
@@ -158,10 +158,24 @@ export class DoctorsController {
     return this.doctorsService.findOne(id)
   }
 
+  // Posibles duplicados de un médico (mismo nombre o exequátur) — 07 §1, §2
+  @Get(':id/duplicates')
+  @UseGuards(JwtAuthGuard)
+  findDuplicates(@Param('id') id: string) {
+    return this.doctorsService.findPotentialDuplicates(id)
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() dto: CreateDoctorDto) {
     return this.doctorsService.create(dto)
+  }
+
+  // Fusionar perfiles duplicados (07 §2) — conserva targetId, elimina sourceId
+  @Post('merge')
+  @UseGuards(JwtAuthGuard)
+  merge(@Body() dto: MergeDoctorsDto) {
+    return this.doctorsService.mergeDoctors(dto)
   }
 
   @Patch(':id')

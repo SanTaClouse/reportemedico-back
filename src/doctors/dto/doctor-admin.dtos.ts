@@ -1,4 +1,6 @@
-import { IsString, IsOptional, IsBoolean, IsEnum, IsDateString, MaxLength } from 'class-validator'
+import {
+  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, MaxLength, IsUUID, IsArray,
+} from 'class-validator'
 import { DoctorStatus, DoctorPlan, BenefitType } from '@prisma/client'
 
 export class UpdateDoctorStatusDto {
@@ -50,4 +52,22 @@ export class UpdateDoctorBenefitDto {
   @IsString()
   @MaxLength(500)
   note?: string
+}
+
+/**
+ * Fusión de perfiles duplicados (07 §2). Se conserva `targetId` (su slug e
+ * historia); `sourceId` se elimina tras transferir su auth0Sub, relaciones e
+ * historial. `fromSource` lista los campos escalares cuyo valor gana el duplicado.
+ */
+export class MergeDoctorsDto {
+  @IsUUID('4')
+  targetId!: string
+
+  @IsUUID('4')
+  sourceId!: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fromSource?: string[]
 }

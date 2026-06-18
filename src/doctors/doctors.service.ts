@@ -10,10 +10,17 @@ import { CreateDoctorDto } from './dto/create-doctor.dto'
 import { UpdateDoctorDto } from './dto/update-doctor.dto'
 import {
   UpdateDoctorStatusDto, UpdateDoctorPlanDto, UpdateDoctorVerificationDto,
-  CreateDoctorBenefitDto, UpdateDoctorBenefitDto,
+  CreateDoctorBenefitDto, UpdateDoctorBenefitDto, MergeDoctorsDto,
 } from './dto/doctor-admin.dtos'
 
 const CLAIM_TOKEN_DAYS = 14
+
+// Campos escalares que el admin puede elegir conservar del duplicado al fusionar (07 §2)
+const MERGEABLE_FIELDS = [
+  'title', 'firstName', 'lastName', 'email', 'phonePublic', 'phoneInternal', 'phoneOffice',
+  'instagram', 'bio', 'photoUrl', 'videoUrl', 'exequatur', 'languages', 'telehealth',
+] as const
+type MergeableField = (typeof MERGEABLE_FIELDS)[number]
 
 @Injectable()
 export class DoctorsService {
@@ -420,6 +427,33 @@ export class DoctorsService {
   }
 
   /**
+   * Posibles duplicados de un médico (07 §1, §2): otros perfiles con el mismo
+   * nombre+apellido (insensible a mayúsculas) o el mismo exequátur. Pista para
+   * que el admin decida si fusionar.
+   */
+  async findPotentialDuplicates(id: string) {
+    const doctor = await this.prisma.doctor.findUnique({
+      where: { id },
+      select: { id: true, firstName: true, lastName: true, exequatur: true },
+    })
+    if (!doctor) throw new NotFoundException('Médico no encontrado')
+
+    const orClauses: Prisma.DoctorWhereInput[] = [
+      {
+        firstName: { equals: doctor.firstName, mode: 'insensitive' },
+        lastName: { equals: doctor.lastName, mode: 'insensitive' },
+      },
+    ]
+    if (doctor.exequatur) orClauses.push({ exequatur: doctor.exequatur })
+
+    return this.prisma.doctor.findMany({
+      where: { id: { not: id }, OR: orClauses },
+      include: this.fullInclude,
+      orderBy: { createdAt: 'asc' },
+    })
+  }
+
+  /**
    * Tabla de engagement del admin (07 §7): una fila por médico con última
    * conexión, sesiones y clics de WhatsApp (30d y total), y artículos.
    */
@@ -770,6 +804,119 @@ export class DoctorsService {
       void this.revalidation.revalidateDoctorPaths(id)
     }
     return doctor
+  }
+
+  // ─── Admin: fusionar perfiles duplicados (07 §2) ────────────────────────────
+
+  /**
+   * Funde `sourceId` dentro de `targetId`: el destino conserva su slug e historia
+   * (capital SEO); el duplicado cede su auth0Sub, sus relaciones (especialidades,
+   * clínicas, seguros), su contenido y su historial (artículos, clics, sesiones,
+   * emails, reviews, beneficios) y luego se elimina. `fromSource` indica qué
+   * campos escalares gana el duplicado. Restricción: el destino NO puede tener
+   * auth0Sub previo (nunca pisar una cuenta ya reclamada).
+   */
+  async mergeDoctors(dto: MergeDoctorsDto) {
+    const { targetId, sourceId, fromSource = [] } = dto
+    if (targetId === sourceId) {
+      throw new BadRequestException('No se puede fusionar un perfil consigo mismo')
+    }
+
+    const [target, source] = await Promise.all([
+      this.prisma.doctor.findUnique({ where: { id: targetId } }),
+      this.prisma.doctor.findUnique({ where: { id: sourceId } }),
+    ])
+    if (!target || !source) throw new NotFoundException('Uno de los perfiles a fusionar no existe')
+    if (target.auth0Sub) {
+      throw new ConflictException(
+        'El perfil que quieres conservar ya fue reclamado por un médico (tiene cuenta). Fusiona hacia el otro perfil.',
+      )
+    }
+
+    // Paths públicos a revalidar: los de ambos perfiles si estaban publicados
+    // (el duplicado, al desaparecer, debe salir del sitemap / dar 404).
+    const pathsBefore = [
+      ...(target.status === DoctorStatus.PUBLISHED ? await this.revalidation.collectDoctorPaths(targetId) : []),
+      ...(source.status === DoctorStatus.PUBLISHED ? await this.revalidation.collectDoctorPaths(sourceId) : []),
+    ]
+
+    // Campos escalares elegidos del duplicado (el resto los conserva el destino)
+    const scalarData: Prisma.DoctorUpdateInput = {}
+    for (const field of fromSource) {
+      if ((MERGEABLE_FIELDS as readonly string[]).includes(field)) {
+        ;(scalarData as Record<string, unknown>)[field] = source[field as MergeableField]
+      }
+    }
+
+    const merged = await this.prisma.$transaction(async (tx) => {
+      // 1. Relaciones 1-N (onDelete Cascade / SetNull): reasignar al destino para
+      //    no perder historial ni contenido cuando se borre el duplicado.
+      const reassign = { where: { doctorId: sourceId }, data: { doctorId: targetId } }
+      await tx.whatsAppClick.updateMany(reassign)
+      await tx.sessionLog.updateMany(reassign)
+      await tx.emailLog.updateMany(reassign)
+      await tx.review.updateMany(reassign)
+      await tx.article.updateMany(reassign)
+      await tx.doctorBenefit.updateMany(reassign)
+
+      // 2. Relaciones N-N: unir, evitando colisión de PK compuesta (el destino
+      //    gana; del duplicado se suman solo las que el destino no tenía).
+      const tSpec = new Set(
+        (await tx.doctorSpecialty.findMany({ where: { doctorId: targetId }, select: { specialtyId: true } }))
+          .map((r) => r.specialtyId),
+      )
+      let specOrder = tSpec.size
+      const sSpec = await tx.doctorSpecialty.findMany({ where: { doctorId: sourceId }, select: { specialtyId: true } })
+      for (const r of sSpec) {
+        if (!tSpec.has(r.specialtyId)) {
+          await tx.doctorSpecialty.create({ data: { doctorId: targetId, specialtyId: r.specialtyId, order: specOrder++ } })
+          tSpec.add(r.specialtyId)
+        }
+      }
+
+      const tClin = new Set(
+        (await tx.doctorClinic.findMany({ where: { doctorId: targetId }, select: { clinicId: true } }))
+          .map((r) => r.clinicId),
+      )
+      const sClin = await tx.doctorClinic.findMany({ where: { doctorId: sourceId } })
+      for (const r of sClin) {
+        if (!tClin.has(r.clinicId)) {
+          await tx.doctorClinic.create({ data: { doctorId: targetId, clinicId: r.clinicId, schedule: r.schedule } })
+          tClin.add(r.clinicId)
+        }
+      }
+
+      const tIns = new Set(
+        (await tx.doctorInsurance.findMany({ where: { doctorId: targetId }, select: { insuranceId: true } }))
+          .map((r) => r.insuranceId),
+      )
+      const sIns = await tx.doctorInsurance.findMany({ where: { doctorId: sourceId }, select: { insuranceId: true } })
+      for (const r of sIns) {
+        if (!tIns.has(r.insuranceId)) {
+          await tx.doctorInsurance.create({ data: { doctorId: targetId, insuranceId: r.insuranceId } })
+          tIns.add(r.insuranceId)
+        }
+      }
+
+      // 3. Borrar el duplicado (cascade limpia sus join sobrantes y claim tokens;
+      //    libera sus campos únicos email/auth0Sub para el update siguiente).
+      await tx.doctor.delete({ where: { id: sourceId } })
+
+      // 4. Aplicar los campos elegidos + heredar el auth0Sub del duplicado
+      return tx.doctor.update({
+        where: { id: targetId },
+        data: {
+          ...scalarData,
+          ...(source.auth0Sub ? { auth0Sub: source.auth0Sub } : {}),
+        },
+        include: this.fullInclude,
+      })
+    })
+
+    if (merged.status === DoctorStatus.PUBLISHED || pathsBefore.length) {
+      void this.revalidation.revalidateDoctorPaths(targetId, pathsBefore)
+    }
+    return merged
   }
 
   // ─── Admin: link de invitación para reclamar perfil (06 §5, 07 §3) ─────────
