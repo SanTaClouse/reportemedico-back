@@ -10,6 +10,7 @@ import {
   doctorReverifyAdminTemplate,
   doctorWelcomeTemplate,
   doctorDigestTemplate,
+  wizardReminderTemplate,
   newsletterDigestTemplate,
   singleArticleEmailTemplate,
   testTemplate,
@@ -107,6 +108,12 @@ export class EmailService {
   async sendDoctorWelcome(to: string, doctorName: string, slug: string): Promise<void> {
     const { subject, html } = doctorWelcomeTemplate(doctorName, slug, this.frontendUrl)
     await this.send(to, subject, html)
+  }
+
+  /** Recordatorio de wizard incompleto a un médico en DRAFT (06 §4) */
+  async sendWizardReminder(to: string, doctorName: string): Promise<boolean> {
+    const { subject, html } = wizardReminderTemplate(doctorName, this.frontendUrl)
+    return this.send(to, subject, html)
   }
 
   // ─── Aviso al admin de nuevo médico pendiente (07 §8) ──────────────────────

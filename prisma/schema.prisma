@@ -388,6 +388,7 @@ model Doctor {
   languages     String[]     @default([]) // ["Español", "Inglés"]
   telehealth    Boolean      @default(false) // modalidad teleconsulta
   emailOptOut   Boolean      @default(false) // baja del digest de noticias; los transaccionales no se afectan
+  wizardRemindersSent Int     @default(0) // recordatorios de wizard incompleto enviados (máx 2, 06 §4)
   status        DoctorStatus @default(DRAFT)
   plan          DoctorPlan   @default(BASIC)
   planNotes     String? // notas del admin sobre cobro/beneficios entregados

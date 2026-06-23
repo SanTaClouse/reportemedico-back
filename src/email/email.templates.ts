@@ -203,6 +203,23 @@ export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: stri
   }
 }
 
+// ─── Recordatorio de wizard incompleto (Doctor en DRAFT, 06 §4) ─────────────
+
+export function wizardReminderTemplate(doctorName: string, frontendUrl: string) {
+  const accountUrl = `${frontendUrl}/mi-cuenta`
+  return {
+    subject: 'Tu perfil en la Guía Médica está casi listo',
+    html: emailLayout(
+      h2('Te falta un paso para aparecer en la Guía') +
+        p(`Hola <strong>${doctorName}</strong>,`) +
+        p('Empezaste a crear tu perfil en la Guía Médica de Reporte Médico, pero quedó sin terminar. Completarlo toma pocos minutos y te deja visible para los pacientes que buscan un especialista como tú: apareces en las búsquedas por seguro, especialidad y ciudad, y te contactan directo por WhatsApp.') +
+        ctaButton('Completar mi perfil', accountUrl) +
+        p('Si ya no te interesa, puedes ignorar este correo.'),
+      { preheader: 'Te falta un paso para aparecer en la Guía Médica', frontendUrl },
+    ),
+  }
+}
+
 // ─── Aviso al admin: médico publicado editó su identidad (re-verificar) ─────
 
 export function doctorReverifyAdminTemplate(doctorName: string, frontendUrl: string) {

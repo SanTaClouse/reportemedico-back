@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { Prisma, DoctorStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { RevalidationService } from '../revalidation/revalidation.service'
@@ -24,6 +25,8 @@ type MergeableField = (typeof MERGEABLE_FIELDS)[number]
 
 @Injectable()
 export class DoctorsService {
+  private readonly logger = new Logger(DoctorsService.name)
+
   constructor(
     private prisma: PrismaService,
     private revalidation: RevalidationService,
@@ -492,6 +495,50 @@ export class DoctorsService {
       whatsappClicksTotal: d._count.whatsappClicks,
       articles: d._count.articles,
     }))
+  }
+
+  // ─── Recordatorios de wizard incompleto (cron, 06 §4) ──────────────────────
+
+  /**
+   * Cada 6h: a los médicos que se registraron pero dejaron el perfil en DRAFT,
+   * les recuerda completarlo a las 48h y a los 7 días. Máximo 2 recordatorios,
+   * después silencio. Solo a perfiles auto-registrados (auth0Sub) con email.
+   */
+  @Cron(CronExpression.EVERY_6_HOURS)
+  async wizardRemindersCron() {
+    const drafts = await this.prisma.doctor.findMany({
+      where: {
+        status: DoctorStatus.DRAFT,
+        auth0Sub: { not: null },
+        email: { not: null },
+        wizardRemindersSent: { lt: 2 },
+      },
+      select: {
+        id: true, email: true, title: true, firstName: true, lastName: true,
+        createdAt: true, wizardRemindersSent: true,
+      },
+    })
+    const now = Date.now()
+    const H48 = 48 * 60 * 60 * 1000
+    const D7 = 7 * 24 * 60 * 60 * 1000
+
+    for (const d of drafts) {
+      const age = now - d.createdAt.getTime()
+      const due =
+        (d.wizardRemindersSent === 0 && age >= H48) ||
+        (d.wizardRemindersSent === 1 && age >= D7)
+      if (!due || !d.email) continue
+
+      const name = `${d.title ?? ''} ${d.firstName} ${d.lastName}`.trim()
+      const ok = await this.emailService.sendWizardReminder(d.email, name)
+      if (ok) {
+        await this.prisma.doctor.update({
+          where: { id: d.id },
+          data: { wizardRemindersSent: { increment: 1 } },
+        })
+        this.logger.log(`[wizard-reminder] enviado #${d.wizardRemindersSent + 1} a ${d.email}`)
+      }
+    }
   }
 
   // ─── Área del médico (self-service, guard 'auth0' — 06 §4, §6) ─────────────
