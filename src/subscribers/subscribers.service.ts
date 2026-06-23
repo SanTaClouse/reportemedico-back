@@ -364,6 +364,136 @@ export class SubscribersService {
     return { ok: true }
   }
 
+  // ─── Digest de noticias por especialidad para médicos (08 §1) ──────────────
+
+  /** Desde cuándo buscar novedades para el digest a médicos (sin duplicar) */
+  private async getDoctorDigestSince(): Promise<Date> {
+    const lastSend = await this.prisma.newsletterSend.findFirst({
+      where: { type: 'doctor-digest' },
+      orderBy: { sentAt: 'desc' },
+      select: { sentAt: true },
+    })
+    return lastSend?.sentAt ?? new Date(Date.now() - DIGEST_DAYS * DAY_MS)
+  }
+
+  /** Artículos nuevos (desde `since`) con sus tagIds, para el match por especialidad */
+  private async digestArticlesWithTags(since: Date) {
+    const articles = await this.prisma.article.findMany({
+      where: { status: 'PUBLISHED', publishedAt: { gt: since } },
+      orderBy: { publishedAt: 'desc' },
+      select: {
+        type: true, title: true, slug: true, excerpt: true, featuredImage: true,
+        tags: { select: { tagId: true } },
+      },
+    })
+    return articles.map((a) => ({
+      article: {
+        type: a.type as DigestArticle['type'],
+        title: a.title,
+        slug: a.slug,
+        excerpt: a.excerpt ? stripAllHtml(a.excerpt).slice(0, 180) : null,
+        featuredImage: a.featuredImage,
+      } as DigestArticle,
+      tagIds: a.tags.map((t) => t.tagId),
+    }))
+  }
+
+  /** Médicos elegibles: publicados, con email y sin opt-out del digest */
+  private digestEligibleDoctors() {
+    return this.prisma.doctor.findMany({
+      where: { status: 'PUBLISHED', emailOptOut: false, email: { not: null } },
+      select: {
+        id: true, email: true, title: true, firstName: true, lastName: true,
+        specialties: { select: { specialty: { select: { tags: { select: { tagId: true } } } } } },
+      },
+    })
+  }
+
+  private doctorTagSet(doctor: { specialties: { specialty: { tags: { tagId: string }[] } }[] }): Set<string> {
+    const set = new Set<string>()
+    for (const ds of doctor.specialties) for (const t of ds.specialty.tags) set.add(t.tagId)
+    return set
+  }
+
+  /** Vista previa del digest a médicos: cuántos lo recibirían y con cuántas novedades */
+  async previewDoctorDigest() {
+    const since = await this.getDoctorDigestSince()
+    const [pool, doctors, lastSend] = await Promise.all([
+      this.digestArticlesWithTags(since),
+      this.digestEligibleDoctors(),
+      this.prisma.newsletterSend.findFirst({ where: { type: 'doctor-digest' }, orderBy: { sentAt: 'desc' } }),
+    ])
+    let willReceive = 0
+    for (const d of doctors) {
+      const tags = this.doctorTagSet(d)
+      if (pool.some((p) => p.tagIds.some((id) => tags.has(id)))) willReceive++
+    }
+    return {
+      articlePool: pool.length,
+      eligibleDoctors: doctors.length,
+      willReceive,
+      lastSentAt: lastSend?.sentAt ?? null,
+      lastSend: lastSend ? { sentAt: lastSend.sentAt, recipients: lastSend.recipients, auto: lastSend.auto } : null,
+    }
+  }
+
+  /** Envía a cada médico las novedades que matchean SUS especialidades (08 §1) */
+  async sendDoctorDigest(opts: { auto?: boolean } = {}) {
+    const since = await this.getDoctorDigestSince()
+    const pool = await this.digestArticlesWithTags(since)
+    if (pool.length === 0) {
+      if (opts.auto) {
+        this.logger.log('[doctor-digest] auto: sin novedades desde el último envío')
+        return { eligible: 0, targeted: 0, sent: 0, failed: 0, skipped: true }
+      }
+      throw new BadRequestException('No hay publicaciones nuevas desde el último digest a médicos')
+    }
+    const doctors = await this.digestEligibleDoctors()
+
+    let sent = 0
+    let failed = 0
+    let targeted = 0
+    for (const d of doctors) {
+      if (!d.email) continue
+      const tags = this.doctorTagSet(d)
+      const matched = pool.filter((p) => p.tagIds.some((id) => tags.has(id))).map((p) => p.article).slice(0, 6)
+      if (matched.length === 0) continue
+      targeted++
+      const name = `${d.title ?? ''} ${d.firstName} ${d.lastName}`.trim()
+      const ok = await this.emailService.sendDoctorDigest(d.email, name, matched, this.doctorOptOutUrl(d.id))
+      if (ok) sent++
+      else failed++
+    }
+    await this.prisma.newsletterSend.create({
+      data: { type: 'doctor-digest', recipients: sent, auto: opts.auto ?? false },
+    })
+    this.logger.log(`[doctor-digest] ${opts.auto ? 'auto ' : ''}enviado a ${sent}/${targeted} (fallidos: ${failed})`)
+    return { eligible: doctors.length, targeted, sent, failed, skipped: false }
+  }
+
+  private doctorOptOutToken(id: string): string {
+    const secret = this.config.get<string>('JWT_SECRET') ?? 'reporte-medico-newsletter'
+    return createHmac('sha256', secret).update(`doctor-optout:${id}`).digest('base64url').slice(0, 24)
+  }
+
+  private doctorOptOutUrl(id: string): string {
+    const front = this.config.get<string>('FRONTEND_URL') ?? 'https://reportemedico.com'
+    return `${front}/digest-medico/baja?d=${id}&t=${this.doctorOptOutToken(id)}`
+  }
+
+  /** Opt-out del digest a médicos (link del email, token HMAC). Apaga emailOptOut. */
+  async doctorDigestOptOut(id: string, token: string) {
+    if (!id || !token || token !== this.doctorOptOutToken(id)) {
+      throw new BadRequestException('El link no es válido')
+    }
+    const doctor = await this.prisma.doctor.findUnique({ where: { id }, select: { id: true, emailOptOut: true } })
+    if (!doctor) throw new NotFoundException('No encontramos tu perfil')
+    if (!doctor.emailOptOut) {
+      await this.prisma.doctor.update({ where: { id }, data: { emailOptOut: true } })
+    }
+    return { ok: true }
+  }
+
   /** Baja del digest: valida el token HMAC del link y marca unsubscribedAt */
   async unsubscribe(id: string, token: string) {
     if (!id || !token || token !== this.unsubToken(id)) {

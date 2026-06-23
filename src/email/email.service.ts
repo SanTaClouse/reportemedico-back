@@ -9,6 +9,7 @@ import {
   doctorPendingAdminTemplate,
   doctorReverifyAdminTemplate,
   doctorWelcomeTemplate,
+  doctorDigestTemplate,
   newsletterDigestTemplate,
   singleArticleEmailTemplate,
   testTemplate,
@@ -153,6 +154,17 @@ export class EmailService {
     unsubscribeUrl: string,
   ): Promise<boolean> {
     const { subject, html } = singleArticleEmailTemplate(name, article, unsubscribeUrl, this.frontendUrl)
+    return this.send(to, subject, html)
+  }
+
+  /** Digest de noticias por especialidad para un médico (08 §1) */
+  async sendDoctorDigest(
+    to: string,
+    doctorName: string,
+    articles: DigestArticle[],
+    optOutUrl: string,
+  ): Promise<boolean> {
+    const { subject, html } = doctorDigestTemplate(doctorName, articles, optOutUrl, this.frontendUrl)
     return this.send(to, subject, html)
   }
 

@@ -159,6 +159,34 @@ export function doctorWelcomeTemplate(doctorName: string, slug: string, frontend
   }
 }
 
+// ─── Digest de noticias por especialidad para médicos (08 §1) ───────────────
+
+export function doctorDigestTemplate(
+  doctorName: string,
+  articles: DigestArticle[],
+  optOutUrl: string,
+  frontendUrl: string,
+) {
+  const greeting = doctorName ? `Hola <strong>${doctorName}</strong>,` : '¡Hola!'
+  const cards = articles.map((a) => digestArticleCard(a, frontendUrl)).join('')
+  const optout = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#8a8f98;line-height:1.5;">
+    Recibes estas novedades como parte de la Guía Médica de Reporte Médico.
+    <a href="${optOutUrl}" style="color:#8a8f98;text-decoration:underline;">Dejar de recibir novedades</a>.
+  </p>`
+
+  return {
+    subject: 'Novedades en tu especialidad — Reporte Médico 🩺',
+    html: emailLayout(
+      h2('Novedades en tu especialidad') +
+        p(greeting) +
+        p('Seleccionamos estas publicaciones recientes relacionadas con tus especialidades:') +
+        cards +
+        optout,
+      { preheader: 'Lo último publicado en tus especialidades', frontendUrl },
+    ),
+  }
+}
+
 // ─── Aviso al admin: nuevo médico pendiente de aprobación ───────────────────
 
 export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: string) {

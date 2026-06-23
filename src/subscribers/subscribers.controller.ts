@@ -94,6 +94,33 @@ export class SubscribersController {
   }
 
   /**
+   * GET/POST /subscribers/doctor-digest/...
+   * Digest de noticias por especialidad para los médicos (08 §1).
+   */
+  @SkipThrottle()
+  @Get('doctor-digest/preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  doctorDigestPreview() {
+    return this.subscribersService.previewDoctorDigest()
+  }
+
+  @SkipThrottle()
+  @Post('doctor-digest/send')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  sendDoctorDigest() {
+    return this.subscribersService.sendDoctorDigest({ auto: false })
+  }
+
+  /** Opt-out del digest a médicos (público, desde el link del email) */
+  @SkipThrottle()
+  @Post('doctor-digest/optout')
+  doctorDigestOptOut(@Body('d') d: string, @Body('t') t: string) {
+    return this.subscribersService.doctorDigestOptOut(d, t)
+  }
+
+  /**
    * GET /subscribers/article/:id/audience
    * Solo admin. Interesados (por tema) + lista de activos para selección manual.
    */
