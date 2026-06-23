@@ -126,11 +126,12 @@ model ArticleTag {
 // ─────────────────────────────────────────────────
 
 model Subscriber {
-  id        String           @id @default(uuid())
-  email     String           @unique
-  name      String?
-  source    SubscriberSource
-  createdAt DateTime         @default(now())
+  id             String           @id @default(uuid())
+  email          String           @unique
+  name           String?
+  source         SubscriberSource
+  unsubscribedAt DateTime? // null = activo; se setea al darse de baja del digest (08)
+  createdAt      DateTime         @default(now())
 
   tags SubscriberTag[]
 

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Query, UseGuards, Logger } from '@nestjs/c
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { SubscribersService } from './subscribers.service'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
+import { SendNewsletterDto, UnsubscribeDto } from './dto/newsletter.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -25,6 +26,16 @@ export class SubscribersController {
   }
 
   /**
+   * POST /subscribers/unsubscribe  (público)
+   * Baja del digest desde el link del email (id + token HMAC).
+   */
+  @Post('unsubscribe')
+  @Throttle({ default: { limit: 30, ttl: 3600000 } })
+  unsubscribe(@Body() dto: UnsubscribeDto) {
+    return this.subscribersService.unsubscribe(dto.s, dto.t)
+  }
+
+  /**
    * GET /subscribers/stats
    * Solo admin. Devuelve totales por fuente.
    */
@@ -34,6 +45,33 @@ export class SubscribersController {
   @Roles('ADMIN')
   getStats() {
     return this.subscribersService.getStats()
+  }
+
+  /**
+   * GET /subscribers/newsletter/preview
+   * Solo admin. Artículos que entrarían en el digest + cantidad de destinatarios.
+   */
+  @SkipThrottle()
+  @Get('newsletter/preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  newsletterPreview(@Query('days') days?: string, @Query('limit') limit?: string) {
+    return this.subscribersService.previewNewsletter(
+      days ? +days : undefined,
+      limit ? +limit : undefined,
+    )
+  }
+
+  /**
+   * POST /subscribers/newsletter/send
+   * Solo admin. Envía el digest a todos los suscriptores activos.
+   */
+  @SkipThrottle()
+  @Post('newsletter/send')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  sendNewsletter(@Body() dto: SendNewsletterDto) {
+    return this.subscribersService.sendNewsletter(dto.days, dto.limit)
   }
 
   /**

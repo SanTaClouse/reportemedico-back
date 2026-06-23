@@ -9,7 +9,9 @@ import {
   doctorPendingAdminTemplate,
   doctorReverifyAdminTemplate,
   doctorWelcomeTemplate,
+  newsletterDigestTemplate,
   testTemplate,
+  type DigestArticle,
 } from './email.templates'
 
 /**
@@ -127,6 +129,19 @@ export class EmailService {
     }
     const { subject, html } = doctorReverifyAdminTemplate(doctorName, this.frontendUrl)
     await this.send(adminEmail, subject, html)
+  }
+
+  // ─── Newsletter: digest a un suscriptor (08 §1) ────────────────────────────
+
+  /** Devuelve true si se envió. El link de baja es único por suscriptor. */
+  async sendNewsletterDigest(
+    to: string,
+    name: string | null,
+    articles: DigestArticle[],
+    unsubscribeUrl: string,
+  ): Promise<boolean> {
+    const { subject, html } = newsletterDigestTemplate(name, articles, unsubscribeUrl, this.frontendUrl)
+    return this.send(to, subject, html)
   }
 
   // ─── Diagnóstico (endpoint admin) ──────────────────────────────────────────

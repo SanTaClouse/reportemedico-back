@@ -191,6 +191,65 @@ export function doctorReverifyAdminTemplate(doctorName: string, frontendUrl: str
   }
 }
 
+// ─── Newsletter: digest de noticias para suscriptores (08 §1) ───────────────
+
+export interface DigestArticle {
+  type: 'NEWS' | 'MEDICAL_ARTICLE'
+  title: string
+  slug: string
+  excerpt: string | null
+  featuredImage: string | null
+}
+
+function digestArticleCard(article: DigestArticle, frontendUrl: string): string {
+  const path = article.type === 'NEWS' ? 'noticias' : 'articulos'
+  const url = `${frontendUrl}/${path}/${article.slug}`
+  const img = article.featuredImage
+    ? `<a href="${url}" style="text-decoration:none;">
+         <img src="${article.featuredImage}" alt="" width="536" style="display:block;width:100%;max-width:536px;height:auto;border-radius:8px;margin-bottom:12px;" />
+       </a>`
+    : ''
+  const excerpt = article.excerpt
+    ? `<p style="margin:0 0 10px;font-size:14px;line-height:1.55;color:#555;">${article.excerpt}</p>`
+    : ''
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+    <tr><td>
+      ${img}
+      <a href="${url}" style="text-decoration:none;">
+        <h2 style="margin:0 0 8px;font-size:18px;line-height:1.35;color:${NAVY};font-weight:bold;">${article.title}</h2>
+      </a>
+      ${excerpt}
+      <a href="${url}" style="display:inline-block;font-size:14px;font-weight:bold;color:${NAVY};text-decoration:none;border-bottom:2px solid ${GOLD};padding-bottom:1px;">Leer la nota →</a>
+    </td></tr>
+  </table>`
+}
+
+export function newsletterDigestTemplate(
+  name: string | null,
+  articles: DigestArticle[],
+  unsubscribeUrl: string,
+  frontendUrl: string,
+) {
+  const greeting = name ? `Hola <strong>${name}</strong>,` : '¡Hola!'
+  const cards = articles.map((a) => digestArticleCard(a, frontendUrl)).join('')
+  const unsubscribe = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#8a8f98;line-height:1.5;">
+    Recibes este correo porque te suscribiste a Reporte Médico.
+    <a href="${unsubscribeUrl}" style="color:#8a8f98;text-decoration:underline;">Darte de baja</a>.
+  </p>`
+
+  return {
+    subject: 'Lo último en salud — Reporte Médico 🩺',
+    html: emailLayout(
+      h2('Lo más reciente de Reporte Médico') +
+        p(greeting) +
+        p('Estas son las publicaciones nuevas que seleccionamos para ti:') +
+        cards +
+        unsubscribe,
+      { preheader: 'Las noticias y artículos médicos más recientes', frontendUrl },
+    ),
+  }
+}
+
 // ─── Prueba de configuración (solo dev/admin) ───────────────────────────────
 
 export function testTemplate(frontendUrl: string) {
