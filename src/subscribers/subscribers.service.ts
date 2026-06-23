@@ -23,13 +23,27 @@ export class SubscribersService {
   ) {}
 
   async subscribeNewsletter(dto: CreateSubscriberDto) {
-    this.logger.log(`[subscribe] email=${dto.email} name=${dto.name ?? '(sin nombre)'}`)
+    this.logger.log(`[subscribe] email=${dto.email} name=${dto.name ?? '(sin nombre)'} temas=${dto.tagIds?.length ?? 0}`)
     try {
       const result = await this.prisma.subscriber.upsert({
         where: { email: dto.email },
         create: { email: dto.email, name: dto.name, source: 'NEWSLETTER_SIGNUP' },
         update: { name: dto.name ?? undefined },
       })
+
+      // Temas de interés (opcional, aditivo): habilitan el envío segmentado (08 §1)
+      if (dto.tagIds?.length) {
+        await Promise.allSettled(
+          dto.tagIds.map((tagId) =>
+            this.prisma.subscriberTag.upsert({
+              where: { subscriberId_tagId: { subscriberId: result.id, tagId } },
+              create: { subscriberId: result.id, tagId },
+              update: {},
+            }),
+          ),
+        )
+      }
+
       this.logger.log(`[subscribe] ✓ Guardado id=${result.id} source=${result.source}`)
       return result
     } catch (err) {
