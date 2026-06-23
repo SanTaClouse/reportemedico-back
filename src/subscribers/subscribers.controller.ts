@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { SubscribersService } from './subscribers.service'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
-import { SendNewsletterDto, UnsubscribeDto, SendArticleEmailDto } from './dto/newsletter.dto'
+import {
+  UnsubscribeDto, SendArticleEmailDto, UpdateNewsletterScheduleDto,
+} from './dto/newsletter.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -55,23 +57,40 @@ export class SubscribersController {
   @Get('newsletter/preview')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  newsletterPreview(@Query('days') days?: string, @Query('limit') limit?: string) {
-    return this.subscribersService.previewNewsletter(
-      days ? +days : undefined,
-      limit ? +limit : undefined,
-    )
+  newsletterPreview() {
+    return this.subscribersService.previewNewsletter()
   }
 
   /**
    * POST /subscribers/newsletter/send
-   * Solo admin. Envía el digest a todos los suscriptores activos.
+   * Solo admin. Envía el digest (lo nuevo desde el último envío) a los activos.
    */
   @SkipThrottle()
   @Post('newsletter/send')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
-  sendNewsletter(@Body() dto: SendNewsletterDto) {
-    return this.subscribersService.sendNewsletter(dto.days, dto.limit)
+  sendNewsletter() {
+    return this.subscribersService.sendNewsletter({ auto: false })
+  }
+
+  /**
+   * GET / PUT /subscribers/newsletter/schedule
+   * Solo admin. Programación del envío semanal automático.
+   */
+  @SkipThrottle()
+  @Get('newsletter/schedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  getSchedule() {
+    return this.subscribersService.getSchedule()
+  }
+
+  @SkipThrottle()
+  @Put('newsletter/schedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  updateSchedule(@Body() dto: UpdateNewsletterScheduleDto) {
+    return this.subscribersService.updateSchedule(dto)
   }
 
   /**

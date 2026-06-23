@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, Min, Max, IsString, IsArray, IsUUID, IsIn } from 'class-validator'
+import { IsOptional, IsInt, Min, Max, IsString, IsArray, IsUUID, IsIn, IsBoolean } from 'class-validator'
 import { Type } from 'class-transformer'
 
 /** Parámetros opcionales del envío del digest (08 §1) */
@@ -40,4 +40,23 @@ export class SendArticleEmailDto {
   @IsArray()
   @IsUUID('4', { each: true })
   subscriberIds?: string[]
+}
+
+/** Programación del digest semanal automático (08 §1) */
+export class UpdateNewsletterScheduleDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  dayOfWeek?: number // 0=domingo … 6=sábado
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  hour?: number
 }

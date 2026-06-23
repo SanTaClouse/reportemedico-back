@@ -1,16 +1,18 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { createHmac } from 'crypto'
 import { PrismaService } from '../prisma/prisma.service'
 import { EmailService } from '../email/email.service'
 import { stripAllHtml } from '../utils/sanitize.util'
 import type { DigestArticle } from '../email/email.templates'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
-import { SendArticleEmailDto } from './dto/newsletter.dto'
+import { SendArticleEmailDto, UpdateNewsletterScheduleDto } from './dto/newsletter.dto'
 
-// Digest: por default mira los últimos 14 días y manda hasta 6 publicaciones (08 §1)
+// Digest: si nunca se envió, mira los últimos 14 días; máx 8 publicaciones (08 §1)
 const DIGEST_DAYS = 14
-const DIGEST_LIMIT = 6
+const DIGEST_LIMIT = 8
+const DAY_MS = 24 * 60 * 60 * 1000
 
 @Injectable()
 export class SubscribersService {
@@ -100,11 +102,21 @@ export class SubscribersService {
 
   // ─── Newsletter / digest (08 §1) ───────────────────────────────────────────
 
-  /** Publicaciones recientes para el digest: las últimas PUBLISHED del período */
-  private async recentArticles(days: number, limit: number): Promise<DigestArticle[]> {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  /** Fecha desde la que se buscan novedades: el último envío del digest (sin
+   *  solapar → nunca se repite una noticia); si nunca se envió, últimos 14 días. */
+  private async getDigestSince(): Promise<Date> {
+    const lastSend = await this.prisma.newsletterSend.findFirst({
+      where: { type: 'digest' },
+      orderBy: { sentAt: 'desc' },
+      select: { sentAt: true },
+    })
+    return lastSend?.sentAt ?? new Date(Date.now() - DIGEST_DAYS * DAY_MS)
+  }
+
+  /** Publicaciones PUBLISHED nuevas (publicadas DESPUÉS de `since`) — sin duplicar */
+  private async recentArticles(since: Date, limit: number): Promise<DigestArticle[]> {
     const articles = await this.prisma.article.findMany({
-      where: { status: 'PUBLISHED', publishedAt: { gte: since } },
+      where: { status: 'PUBLISHED', publishedAt: { gt: since } },
       orderBy: { publishedAt: 'desc' },
       take: limit,
       select: { type: true, title: true, slug: true, excerpt: true, featuredImage: true },
@@ -118,25 +130,57 @@ export class SubscribersService {
     }))
   }
 
-  /** Vista previa para el admin: qué artículos irían, a cuántos, y cuándo fue el último envío */
-  async previewNewsletter(days = DIGEST_DAYS, limit = DIGEST_LIMIT) {
-    const [articles, recipientCount, lastSend] = await Promise.all([
-      this.recentArticles(days, limit),
-      this.prisma.subscriber.count({ where: { unsubscribedAt: null } }),
-      this.prisma.newsletterSend.findFirst({
-        where: { type: 'digest' },
-        orderBy: { sentAt: 'desc' },
-        select: { sentAt: true },
-      }),
-    ])
-    return { articles, recipientCount, days, lastSentAt: lastSend?.sentAt ?? null }
+  /** Próxima fecha de envío automático según la programación (null si está apagada) */
+  private computeNextRun(schedule: { enabled: boolean; dayOfWeek: number; hour: number } | null): Date | null {
+    if (!schedule || !schedule.enabled) return null
+    const now = new Date()
+    const next = new Date(now)
+    next.setHours(schedule.hour, 0, 0, 0)
+    let diff = (schedule.dayOfWeek - now.getDay() + 7) % 7
+    if (diff === 0 && next.getTime() <= now.getTime()) diff = 7
+    next.setDate(next.getDate() + diff)
+    return next
   }
 
-  /** Envía el digest a todos los suscriptores activos. Nunca falla por un email. */
-  async sendNewsletter(days = DIGEST_DAYS, limit = DIGEST_LIMIT) {
-    const articles = await this.recentArticles(days, limit)
+  /** Vista previa del admin: novedades a enviar, destinatarios, último envío y programación */
+  async previewNewsletter() {
+    const since = await this.getDigestSince()
+    const [articles, recipientCount, lastSend, schedule] = await Promise.all([
+      this.recentArticles(since, DIGEST_LIMIT),
+      this.prisma.subscriber.count({ where: { unsubscribedAt: null } }),
+      this.prisma.newsletterSend.findFirst({ where: { type: 'digest' }, orderBy: { sentAt: 'desc' } }),
+      this.getSchedule(),
+    ])
+    return {
+      articles,
+      recipientCount,
+      lastSentAt: lastSend?.sentAt ?? null,
+      lastSend: lastSend
+        ? {
+            sentAt: lastSend.sentAt,
+            recipients: lastSend.recipients,
+            articleTitles: lastSend.articleTitles,
+            auto: lastSend.auto,
+          }
+        : null,
+      schedule,
+      nextRunAt: this.computeNextRun(schedule),
+    }
+  }
+
+  /**
+   * Envía el digest a todos los suscriptores activos (sólo lo nuevo desde el
+   * último envío). Nunca falla por un email. `auto` marca el envío del cron.
+   */
+  async sendNewsletter(opts: { auto?: boolean } = {}) {
+    const since = await this.getDigestSince()
+    const articles = await this.recentArticles(since, DIGEST_LIMIT)
     if (articles.length === 0) {
-      throw new BadRequestException('No hay publicaciones recientes para enviar')
+      if (opts.auto) {
+        this.logger.log('[newsletter] auto: sin novedades desde el último envío, no se envía')
+        return { total: 0, sent: 0, failed: 0, articles: 0, skipped: true }
+      }
+      throw new BadRequestException('No hay publicaciones nuevas desde el último envío')
     }
     const subscribers = await this.prisma.subscriber.findMany({
       where: { unsubscribedAt: null },
@@ -156,10 +200,62 @@ export class SubscribersService {
       if (ok) sent++
       else failed++
     }
-    // Registra el envío para el freno de frecuencia del panel
-    await this.prisma.newsletterSend.create({ data: { type: 'digest', recipients: sent } })
-    this.logger.log(`[newsletter] enviado a ${sent}/${subscribers.length} (fallidos: ${failed})`)
-    return { total: subscribers.length, sent, failed, articles: articles.length }
+    // Registra el envío (freno de frecuencia + cartel de "entregadas")
+    await this.prisma.newsletterSend.create({
+      data: {
+        type: 'digest',
+        recipients: sent,
+        articleTitles: articles.map((a) => a.title),
+        auto: opts.auto ?? false,
+      },
+    })
+    this.logger.log(`[newsletter] ${opts.auto ? 'auto ' : ''}enviado a ${sent}/${subscribers.length} (fallidos: ${failed})`)
+    return { total: subscribers.length, sent, failed, articles: articles.length, skipped: false }
+  }
+
+  // ─── Programación semanal automática (08 §1) ───────────────────────────────
+
+  /** Config de envío automático (singleton; la crea con defaults si no existe) */
+  async getSchedule() {
+    const existing = await this.prisma.newsletterSchedule.findFirst()
+    return existing ?? this.prisma.newsletterSchedule.create({ data: {} })
+  }
+
+  async updateSchedule(dto: UpdateNewsletterScheduleDto) {
+    const existing = await this.prisma.newsletterSchedule.findFirst()
+    const data = {
+      ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
+      ...(dto.dayOfWeek !== undefined ? { dayOfWeek: dto.dayOfWeek } : {}),
+      ...(dto.hour !== undefined ? { hour: dto.hour } : {}),
+    }
+    return existing
+      ? this.prisma.newsletterSchedule.update({ where: { id: existing.id }, data })
+      : this.prisma.newsletterSchedule.create({ data })
+  }
+
+  /**
+   * Cron horario: si hay programación activa y hoy es el día configurado y ya
+   * pasó la hora, y no se envió en los últimos 6 días, dispara el digest. Sólo
+   * envía si hay novedades (no satura con correos vacíos).
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async weeklyDigestCron() {
+    const schedule = await this.prisma.newsletterSchedule.findFirst()
+    if (!schedule || !schedule.enabled) return
+
+    const now = new Date()
+    if (now.getDay() !== schedule.dayOfWeek || now.getHours() < schedule.hour) return
+
+    const lastSend = await this.prisma.newsletterSend.findFirst({
+      where: { type: 'digest' },
+      orderBy: { sentAt: 'desc' },
+      select: { sentAt: true },
+    })
+    // Ya se envió esta semana → no repetir
+    if (lastSend && lastSend.sentAt.getTime() > Date.now() - 6 * DAY_MS) return
+
+    this.logger.log('[newsletter-cron] disparando digest semanal automático')
+    await this.sendNewsletter({ auto: true })
   }
 
   // ─── Envío de una noticia por correo (segmentado, 08 §1) ───────────────────

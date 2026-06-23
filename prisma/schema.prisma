@@ -155,13 +155,24 @@ model SubscriberTag {
 
 // Registro de envíos del newsletter — alimenta el freno de frecuencia (08 §1)
 model NewsletterSend {
-  id         String   @id @default(uuid())
-  type       String // 'digest' | 'article'
-  articleId  String? // si type='article'
-  recipients Int // a cuántos se envió
-  sentAt     DateTime @default(now())
+  id            String   @id @default(uuid())
+  type          String // 'digest' | 'article'
+  articleId     String? // si type='article'
+  recipients    Int // a cuántos se envió
+  articleTitles String[] @default([]) // títulos enviados (cartel "entregadas")
+  auto          Boolean  @default(false) // true = envío automático del cron
+  sentAt        DateTime @default(now())
 
   @@index([type, sentAt])
+}
+
+// Programación del digest semanal automático (config única, 08 §1)
+model NewsletterSchedule {
+  id        String   @id @default(uuid())
+  enabled   Boolean  @default(false)
+  dayOfWeek Int      @default(1) // 0=domingo … 6=sábado (default: lunes)
+  hour      Int      @default(9) // hora local del server (TZ America/Santo_Domingo)
+  updatedAt DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────────
