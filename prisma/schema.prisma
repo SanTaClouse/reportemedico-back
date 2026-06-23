@@ -153,6 +153,17 @@ model SubscriberTag {
   @@id([subscriberId, tagId])
 }
 
+// Registro de envíos del newsletter — alimenta el freno de frecuencia (08 §1)
+model NewsletterSend {
+  id         String   @id @default(uuid())
+  type       String // 'digest' | 'article'
+  articleId  String? // si type='article'
+  recipients Int // a cuántos se envió
+  sentAt     DateTime @default(now())
+
+  @@index([type, sentAt])
+}
+
 // ─────────────────────────────────────────────────
 // MEDIA (Cloudinary)
 // ─────────────────────────────────────────────────

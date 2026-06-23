@@ -118,13 +118,18 @@ export class SubscribersService {
     }))
   }
 
-  /** Vista previa para el admin: qué artículos irían y a cuántos suscriptores */
+  /** Vista previa para el admin: qué artículos irían, a cuántos, y cuándo fue el último envío */
   async previewNewsletter(days = DIGEST_DAYS, limit = DIGEST_LIMIT) {
-    const [articles, recipientCount] = await Promise.all([
+    const [articles, recipientCount, lastSend] = await Promise.all([
       this.recentArticles(days, limit),
       this.prisma.subscriber.count({ where: { unsubscribedAt: null } }),
+      this.prisma.newsletterSend.findFirst({
+        where: { type: 'digest' },
+        orderBy: { sentAt: 'desc' },
+        select: { sentAt: true },
+      }),
     ])
-    return { articles, recipientCount, days }
+    return { articles, recipientCount, days, lastSentAt: lastSend?.sentAt ?? null }
   }
 
   /** Envía el digest a todos los suscriptores activos. Nunca falla por un email. */
@@ -151,6 +156,8 @@ export class SubscribersService {
       if (ok) sent++
       else failed++
     }
+    // Registra el envío para el freno de frecuencia del panel
+    await this.prisma.newsletterSend.create({ data: { type: 'digest', recipients: sent } })
     this.logger.log(`[newsletter] enviado a ${sent}/${subscribers.length} (fallidos: ${failed})`)
     return { total: subscribers.length, sent, failed, articles: articles.length }
   }
@@ -246,8 +253,19 @@ export class SubscribersService {
       if (ok) sent++
       else failed++
     }
+    await this.prisma.newsletterSend.create({
+      data: { type: 'article', articleId, recipients: sent },
+    })
     this.logger.log(`[article-email] "${article.title}" → ${sent}/${recipients.length} (fallidos: ${failed})`)
     return { total: recipients.length, sent, failed }
+  }
+
+  /** Elimina un suscriptor (limpieza de duplicados/typos). Cascade borra sus tags. */
+  async deleteSubscriber(id: string) {
+    const subscriber = await this.prisma.subscriber.findUnique({ where: { id }, select: { id: true } })
+    if (!subscriber) throw new NotFoundException('Suscriptor no encontrado')
+    await this.prisma.subscriber.delete({ where: { id } })
+    return { ok: true }
   }
 
   /** Baja del digest: valida el token HMAC del link y marca unsubscribedAt */

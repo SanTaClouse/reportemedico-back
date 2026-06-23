@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { SubscribersService } from './subscribers.service'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
@@ -108,5 +108,17 @@ export class SubscribersController {
   @Roles('ADMIN')
   findAll(@Query('page') page: string, @Query('limit') limit: string) {
     return this.subscribersService.findAll(+page || 1, +limit || 20)
+  }
+
+  /**
+   * DELETE /subscribers/:id
+   * Solo admin. Elimina un suscriptor (limpieza de duplicados/typos).
+   */
+  @SkipThrottle()
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  deleteSubscriber(@Param('id') id: string) {
+    return this.subscribersService.deleteSubscriber(id)
   }
 }
