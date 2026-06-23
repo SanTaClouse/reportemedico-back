@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Body, Query, UseGuards, Logger } from '@nestjs/common'
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { SubscribersService } from './subscribers.service'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
-import { SendNewsletterDto, UnsubscribeDto } from './dto/newsletter.dto'
+import { SendNewsletterDto, UnsubscribeDto, SendArticleEmailDto } from './dto/newsletter.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -72,6 +72,30 @@ export class SubscribersController {
   @Roles('ADMIN')
   sendNewsletter(@Body() dto: SendNewsletterDto) {
     return this.subscribersService.sendNewsletter(dto.days, dto.limit)
+  }
+
+  /**
+   * GET /subscribers/article/:id/audience
+   * Solo admin. Interesados (por tema) + lista de activos para selección manual.
+   */
+  @SkipThrottle()
+  @Get('article/:id/audience')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  articleAudience(@Param('id') id: string) {
+    return this.subscribersService.articleAudience(id)
+  }
+
+  /**
+   * POST /subscribers/article/:id/send
+   * Solo admin. Envía la noticia a los interesados o a una selección manual.
+   */
+  @SkipThrottle()
+  @Post('article/:id/send')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  sendArticleEmail(@Param('id') id: string, @Body() dto: SendArticleEmailDto) {
+    return this.subscribersService.sendArticleEmail(id, dto)
   }
 
   /**

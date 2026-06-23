@@ -10,6 +10,7 @@ import {
   doctorReverifyAdminTemplate,
   doctorWelcomeTemplate,
   newsletterDigestTemplate,
+  singleArticleEmailTemplate,
   testTemplate,
   type DigestArticle,
 } from './email.templates'
@@ -141,6 +142,17 @@ export class EmailService {
     unsubscribeUrl: string,
   ): Promise<boolean> {
     const { subject, html } = newsletterDigestTemplate(name, articles, unsubscribeUrl, this.frontendUrl)
+    return this.send(to, subject, html)
+  }
+
+  /** Email de una sola noticia a un suscriptor segmentado (08 §1) */
+  async sendSingleArticle(
+    to: string,
+    name: string | null,
+    article: DigestArticle,
+    unsubscribeUrl: string,
+  ): Promise<boolean> {
+    const { subject, html } = singleArticleEmailTemplate(name, article, unsubscribeUrl, this.frontendUrl)
     return this.send(to, subject, html)
   }
 

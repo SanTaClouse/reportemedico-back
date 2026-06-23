@@ -224,6 +224,13 @@ function digestArticleCard(article: DigestArticle, frontendUrl: string): string 
   </table>`
 }
 
+function unsubscribeFooter(unsubscribeUrl: string): string {
+  return `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#8a8f98;line-height:1.5;">
+    Recibes este correo porque te suscribiste a Reporte Médico.
+    <a href="${unsubscribeUrl}" style="color:#8a8f98;text-decoration:underline;">Darte de baja</a>.
+  </p>`
+}
+
 export function newsletterDigestTemplate(
   name: string | null,
   articles: DigestArticle[],
@@ -232,10 +239,6 @@ export function newsletterDigestTemplate(
 ) {
   const greeting = name ? `Hola <strong>${name}</strong>,` : '¡Hola!'
   const cards = articles.map((a) => digestArticleCard(a, frontendUrl)).join('')
-  const unsubscribe = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#8a8f98;line-height:1.5;">
-    Recibes este correo porque te suscribiste a Reporte Médico.
-    <a href="${unsubscribeUrl}" style="color:#8a8f98;text-decoration:underline;">Darte de baja</a>.
-  </p>`
 
   return {
     subject: 'Lo último en salud — Reporte Médico 🩺',
@@ -244,8 +247,29 @@ export function newsletterDigestTemplate(
         p(greeting) +
         p('Estas son las publicaciones nuevas que seleccionamos para ti:') +
         cards +
-        unsubscribe,
+        unsubscribeFooter(unsubscribeUrl),
       { preheader: 'Las noticias y artículos médicos más recientes', frontendUrl },
+    ),
+  }
+}
+
+/** Email de una sola noticia/artículo, dirigido a una audiencia segmentada (08 §1) */
+export function singleArticleEmailTemplate(
+  name: string | null,
+  article: DigestArticle,
+  unsubscribeUrl: string,
+  frontendUrl: string,
+) {
+  const greeting = name ? `Hola <strong>${name}</strong>,` : '¡Hola!'
+
+  return {
+    subject: article.title,
+    html: emailLayout(
+      p(greeting) +
+        p('Publicamos algo nuevo que creemos que te interesa:') +
+        digestArticleCard(article, frontendUrl) +
+        unsubscribeFooter(unsubscribeUrl),
+      { preheader: article.excerpt ?? article.title, frontendUrl },
     ),
   }
 }

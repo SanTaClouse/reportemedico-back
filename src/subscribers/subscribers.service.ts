@@ -6,6 +6,7 @@ import { EmailService } from '../email/email.service'
 import { stripAllHtml } from '../utils/sanitize.util'
 import type { DigestArticle } from '../email/email.templates'
 import { CreateSubscriberDto } from './dto/create-subscriber.dto'
+import { SendArticleEmailDto } from './dto/newsletter.dto'
 
 // Digest: por default mira los últimos 14 días y manda hasta 6 publicaciones (08 §1)
 const DIGEST_DAYS = 14
@@ -138,6 +139,101 @@ export class SubscribersService {
     }
     this.logger.log(`[newsletter] enviado a ${sent}/${subscribers.length} (fallidos: ${failed})`)
     return { total: subscribers.length, sent, failed, articles: articles.length }
+  }
+
+  // ─── Envío de una noticia por correo (segmentado, 08 §1) ───────────────────
+
+  /** Audiencia disponible para enviar una noticia: interesados + lista para selección manual */
+  async articleAudience(articleId: string) {
+    const article = await this.prisma.article.findUnique({
+      where: { id: articleId },
+      select: {
+        id: true, title: true, slug: true, type: true, status: true,
+        tags: { select: { tag: { select: { id: true, name: true } } } },
+      },
+    })
+    if (!article) throw new NotFoundException('Artículo no encontrado')
+
+    const tagIds = article.tags.map((t) => t.tag.id)
+    const tagSet = new Set(tagIds)
+
+    const [interestedCount, subscribers] = await Promise.all([
+      tagIds.length
+        ? this.prisma.subscriber.count({
+            where: { unsubscribedAt: null, tags: { some: { tagId: { in: tagIds } } } },
+          })
+        : Promise.resolve(0),
+      this.prisma.subscriber.findMany({
+        where: { unsubscribedAt: null },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, email: true, name: true, tags: { select: { tagId: true } } },
+      }),
+    ])
+
+    return {
+      article: { id: article.id, title: article.title, slug: article.slug, type: article.type, status: article.status },
+      tags: article.tags.map((t) => t.tag.name),
+      interestedCount,
+      totalActive: subscribers.length,
+      recipients: subscribers.map((s) => ({
+        id: s.id,
+        email: s.email,
+        name: s.name,
+        interested: s.tags.some((t) => tagSet.has(t.tagId)),
+      })),
+    }
+  }
+
+  /** Envía una noticia a la audiencia elegida (interesados o selección manual) */
+  async sendArticleEmail(articleId: string, dto: SendArticleEmailDto) {
+    const article = await this.prisma.article.findUnique({
+      where: { id: articleId },
+      select: {
+        title: true, slug: true, type: true, excerpt: true, featuredImage: true,
+        tags: { select: { tagId: true } },
+      },
+    })
+    if (!article) throw new NotFoundException('Artículo no encontrado')
+
+    let recipients: { id: string; email: string; name: string | null }[]
+    if (dto.subscriberIds?.length) {
+      // Selección manual (solo activos, por seguridad)
+      recipients = await this.prisma.subscriber.findMany({
+        where: { id: { in: dto.subscriberIds }, unsubscribedAt: null },
+        select: { id: true, email: true, name: true },
+      })
+    } else {
+      // Interesados: suscriptores activos con un tema en común con la noticia
+      const tagIds = article.tags.map((t) => t.tagId)
+      if (!tagIds.length) {
+        throw new BadRequestException('Esta noticia no tiene temas, así que no hay a quién segmentar. Elige los destinatarios manualmente.')
+      }
+      recipients = await this.prisma.subscriber.findMany({
+        where: { unsubscribedAt: null, tags: { some: { tagId: { in: tagIds } } } },
+        select: { id: true, email: true, name: true },
+      })
+    }
+    if (recipients.length === 0) {
+      throw new BadRequestException('No hay destinatarios activos para este envío')
+    }
+
+    const digestArticle: DigestArticle = {
+      type: article.type as DigestArticle['type'],
+      title: article.title,
+      slug: article.slug,
+      excerpt: article.excerpt ? stripAllHtml(article.excerpt).slice(0, 180) : null,
+      featuredImage: article.featuredImage,
+    }
+
+    let sent = 0
+    let failed = 0
+    for (const r of recipients) {
+      const ok = await this.emailService.sendSingleArticle(r.email, r.name, digestArticle, this.unsubscribeUrl(r.id))
+      if (ok) sent++
+      else failed++
+    }
+    this.logger.log(`[article-email] "${article.title}" → ${sent}/${recipients.length} (fallidos: ${failed})`)
+    return { total: recipients.length, sent, failed }
   }
 
   /** Baja del digest: valida el token HMAC del link y marca unsubscribedAt */
