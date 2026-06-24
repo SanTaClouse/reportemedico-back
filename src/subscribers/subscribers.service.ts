@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Cron, CronExpression } from '@nestjs/schedule'
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes } from 'crypto'
 import { PrismaService } from '../prisma/prisma.service'
 import { EmailService } from '../email/email.service'
 import { stripAllHtml } from '../utils/sanitize.util'
@@ -460,7 +460,10 @@ export class SubscribersService {
       if (matched.length === 0) continue
       targeted++
       const name = `${d.title ?? ''} ${d.firstName} ${d.lastName}`.trim()
-      const ok = await this.emailService.sendDoctorDigest(d.email, name, matched, this.doctorOptOutUrl(d.id))
+      // EmailLog con token único: atribuye los clics y la sesión que abra (08 §2)
+      const token = randomBytes(16).toString('base64url')
+      await this.prisma.emailLog.create({ data: { doctorId: d.id, type: 'specialty-news', token } })
+      const ok = await this.emailService.sendDoctorDigest(d.email, name, matched, this.doctorOptOutUrl(d.id), token)
       if (ok) sent++
       else failed++
     }

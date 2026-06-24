@@ -166,9 +166,10 @@ export function doctorDigestTemplate(
   articles: DigestArticle[],
   optOutUrl: string,
   frontendUrl: string,
+  trackToken?: string,
 ) {
   const greeting = doctorName ? `Hola <strong>${doctorName}</strong>,` : '¡Hola!'
-  const cards = articles.map((a) => digestArticleCard(a, frontendUrl)).join('')
+  const cards = articles.map((a) => digestArticleCard(a, frontendUrl, trackToken)).join('')
   const optout = `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#8a8f98;line-height:1.5;">
     Recibes estas novedades como parte de la Guía Médica de Reporte Médico.
     <a href="${optOutUrl}" style="color:#8a8f98;text-decoration:underline;">Dejar de recibir novedades</a>.
@@ -246,9 +247,15 @@ export interface DigestArticle {
   featuredImage: string | null
 }
 
-function digestArticleCard(article: DigestArticle, frontendUrl: string): string {
+/** Con token de email, enruta el link por /e/<token> para atribución (08 §2) */
+function trackedUrl(frontendUrl: string, path: string, token?: string): string {
+  if (!token) return `${frontendUrl}${path}`
+  return `${frontendUrl}/e/${token}?to=${encodeURIComponent(path)}`
+}
+
+function digestArticleCard(article: DigestArticle, frontendUrl: string, token?: string): string {
   const path = article.type === 'NEWS' ? 'noticias' : 'articulos'
-  const url = `${frontendUrl}/${path}/${article.slug}`
+  const url = trackedUrl(frontendUrl, `/${path}/${article.slug}`, token)
   const img = article.featuredImage
     ? `<a href="${url}" style="text-decoration:none;">
          <img src="${article.featuredImage}" alt="" width="536" style="display:block;width:100%;max-width:536px;height:auto;border-radius:8px;margin-bottom:12px;" />

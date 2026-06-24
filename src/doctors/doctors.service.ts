@@ -462,7 +462,7 @@ export class DoctorsService {
    */
   async getEngagement() {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    const [doctors, clicks30, sessions30] = await Promise.all([
+    const [doctors, clicks30, sessions30, viaEmail] = await Promise.all([
       this.prisma.doctor.findMany({
         orderBy: { createdAt: 'desc' },
         select: {
@@ -478,9 +478,14 @@ export class DoctorsService {
       this.prisma.sessionLog.groupBy({
         by: ['doctorId'], where: { createdAt: { gte: since } }, _count: { _all: true },
       }),
+      // Sesiones que entraron desde un email (atribución, 08 §2)
+      this.prisma.sessionLog.groupBy({
+        by: ['doctorId'], where: { viaEmailId: { not: null } }, _count: { _all: true },
+      }),
     ])
     const clickMap = new Map(clicks30.map((c) => [c.doctorId, c._count._all]))
     const sessMap = new Map(sessions30.map((s) => [s.doctorId, s._count._all]))
+    const emailMap = new Map(viaEmail.map((s) => [s.doctorId, s._count._all]))
 
     return doctors.map((d) => ({
       id: d.id,
@@ -493,6 +498,7 @@ export class DoctorsService {
       sessionsTotal: d._count.sessions,
       whatsappClicks30d: clickMap.get(d.id) ?? 0,
       whatsappClicksTotal: d._count.whatsappClicks,
+      viaEmailSessions: emailMap.get(d.id) ?? 0,
       articles: d._count.articles,
     }))
   }

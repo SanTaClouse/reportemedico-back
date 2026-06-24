@@ -164,14 +164,15 @@ export class EmailService {
     return this.send(to, subject, html)
   }
 
-  /** Digest de noticias por especialidad para un médico (08 §1) */
+  /** Digest de noticias por especialidad para un médico (08 §1). `trackToken` atribuye los clics (08 §2). */
   async sendDoctorDigest(
     to: string,
     doctorName: string,
     articles: DigestArticle[],
     optOutUrl: string,
+    trackToken?: string,
   ): Promise<boolean> {
-    const { subject, html } = doctorDigestTemplate(doctorName, articles, optOutUrl, this.frontendUrl)
+    const { subject, html } = doctorDigestTemplate(doctorName, articles, optOutUrl, this.frontendUrl, trackToken)
     return this.send(to, subject, html)
   }
 

@@ -21,6 +21,14 @@ export class EngagementController {
     await this.engagementService.registerWhatsAppClick(dto)
   }
 
+  /** Clic en un link tokenizado de un email → EmailClick (atribución, 08 §2). Público. */
+  @Post('email-click')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  async emailClick(@Body('token') token: string) {
+    await this.engagementService.registerEmailClick(token)
+  }
+
   /** Registra una sesión del médico logueado (lo llama el callback de Auth0). */
   @Post('session')
   @HttpCode(204)

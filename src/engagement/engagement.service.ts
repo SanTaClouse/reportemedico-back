@@ -17,6 +17,17 @@ export class EngagementService {
     }
   }
 
+  /** Registra el clic en un link tokenizado de un email (atribución, 08 §2) */
+  async registerEmailClick(token: string): Promise<void> {
+    if (!token) return
+    try {
+      const log = await this.prisma.emailLog.findUnique({ where: { token }, select: { id: true } })
+      if (log) await this.prisma.emailClick.create({ data: { emailLogId: log.id } })
+    } catch {
+      // token inválido u otro error: se ignora a propósito
+    }
+  }
+
   /**
    * Registra una sesión del médico logueado (06 §5bis). Si todavía no tiene
    * perfil (Doctor), no hay sesión que registrar. Si la navegación traía un
