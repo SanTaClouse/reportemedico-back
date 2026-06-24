@@ -441,8 +441,8 @@ model Clinic {
   address   String
   cityId    String
   city      City    @relation(fields: [cityId], references: [id])
-  latitude  Float
-  longitude Float
+  latitude  Float?  // opcional: el admin puede crear la clínica y mapearla luego (queda en "sin ubicar")
+  longitude Float?  // sin coords NO aparece en el mapa ni en "cerca de mí"; sí en listados por especialidad/ciudad
   phone     String?
 
   doctors DoctorClinic[]

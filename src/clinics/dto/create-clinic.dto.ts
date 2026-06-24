@@ -14,15 +14,19 @@ export class CreateClinicDto {
   @IsUUID()
   cityId!: string
 
+  // Coords opcionales: el admin puede crear la clínica sin ubicarla y mapearla
+  // después (queda flageada como "sin ubicación" en el panel).
+  @IsOptional()
   @IsNumber()
   @Min(-90)
   @Max(90)
-  latitude!: number
+  latitude?: number
 
+  @IsOptional()
   @IsNumber()
   @Min(-180)
   @Max(180)
-  longitude!: number
+  longitude?: number
 
   @IsOptional()
   @IsString()

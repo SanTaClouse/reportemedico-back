@@ -89,7 +89,9 @@ export class ClinicsService {
     return this.prisma.clinic.delete({ where: { id } })
   }
 
-  private withLocationWarning<T extends { latitude: number; longitude: number }>(clinic: T) {
+  private withLocationWarning<T extends { latitude: number | null; longitude: number | null }>(clinic: T) {
+    // Sin coordenadas no hay nada que validar: queda "sin ubicar" y el panel la flagea aparte.
+    if (clinic.latitude == null || clinic.longitude == null) return clinic
     const outOfRd =
       clinic.latitude < RD_BOUNDS.latMin ||
       clinic.latitude > RD_BOUNDS.latMax ||

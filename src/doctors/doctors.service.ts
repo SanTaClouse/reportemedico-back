@@ -191,7 +191,9 @@ export class DoctorsService {
         rotation: this.stableHash(d.id + seed),
         distanceKm: useGeo
           ? Math.min(
-              ...d.clinics.map((c) => this.haversineKm(lat!, lng!, c.clinic.latitude, c.clinic.longitude)),
+              ...d.clinics
+                .filter((c) => c.clinic.latitude != null && c.clinic.longitude != null)
+                .map((c) => this.haversineKm(lat!, lng!, c.clinic.latitude!, c.clinic.longitude!)),
               Infinity,
             )
           : null,
@@ -289,7 +291,7 @@ export class DoctorsService {
     photoUrl: string | null; isVerified: boolean; telehealth: boolean; languages: string[]
     phonePublic: string | null; bio: string | null
     specialties: { order: number; specialty: { slug: string; name: string } }[]
-    clinics: { schedule: string | null; clinic: { slug: string; name: string; address: string; latitude: number; longitude: number; city: { slug: string; name: string } } }[]
+    clinics: { schedule: string | null; clinic: { slug: string; name: string; address: string; latitude: number | null; longitude: number | null; city: { slug: string; name: string } } }[]
     insurances: { insurance: { slug: string; name: string } }[]
   }) {
     return {
