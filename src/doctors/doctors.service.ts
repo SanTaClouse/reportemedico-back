@@ -12,6 +12,7 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto'
 import {
   UpdateDoctorStatusDto, UpdateDoctorPlanDto, UpdateDoctorVerificationDto,
   CreateDoctorBenefitDto, UpdateDoctorBenefitDto, MergeDoctorsDto,
+  ResolveClinicSuggestionDto,
 } from './dto/doctor-admin.dtos'
 
 const CLAIM_TOKEN_DAYS = 14
@@ -404,6 +405,7 @@ export class DoctorsService {
       where: { id },
       include: {
         ...this.fullInclude,
+        clinicSuggestions: { where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' as const } },
         benefits: { orderBy: { createdAt: 'desc' as const } },
         claimTokens: { orderBy: { createdAt: 'desc' as const } },
         _count: { select: { articles: true, whatsappClicks: true, sessions: true } },
@@ -555,7 +557,11 @@ export class DoctorsService {
   findOwn(auth0Sub: string) {
     return this.prisma.doctor.findUnique({
       where: { auth0Sub },
-      include: { ...this.fullInclude, _count: { select: { articles: true } } },
+      include: {
+        ...this.fullInclude,
+        clinicSuggestions: { where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' as const } },
+        _count: { select: { articles: true } },
+      },
     })
   }
 
@@ -574,9 +580,10 @@ export class DoctorsService {
     if (!firstName || !lastName) {
       throw new BadRequestException('Nombre y apellido son obligatorios para crear tu perfil')
     }
-    const { specialtyIds, clinics, insuranceIds, ...fields } = dto
+    const { specialtyIds, clinics, clinicSuggestions, insuranceIds, ...fields } = dto
     const data = this.sanitizeScalars(fields)
     const slug = await this.generateSlug(dto.title, firstName, lastName)
+    const suggestionRows = this.normalizeSuggestionRows(clinicSuggestions)
     try {
       return await this.prisma.doctor.create({
         data: {
@@ -592,6 +599,9 @@ export class DoctorsService {
             : undefined,
           clinics: clinics?.length
             ? { create: clinics.map((c) => ({ clinicId: c.clinicId, schedule: c.schedule })) }
+            : undefined,
+          clinicSuggestions: suggestionRows.length
+            ? { create: suggestionRows }
             : undefined,
           insurances: insuranceIds?.length
             ? { create: insuranceIds.map((insuranceId) => ({ insuranceId })) }
@@ -730,7 +740,7 @@ export class DoctorsService {
         ? await this.revalidation.collectDoctorPaths(id)
         : []
 
-    const { specialtyIds, clinics, insuranceIds, ...fields } = dto
+    const { specialtyIds, clinics, clinicSuggestions, insuranceIds, ...fields } = dto
     const data = this.sanitizeScalars(fields)
 
     // Re-verificación (06 §7): si el propio médico edita su identidad (nombre,
@@ -756,6 +766,13 @@ export class DoctorsService {
           await tx.doctorClinic.createMany({
             data: clinics.map((c) => ({ doctorId: id, clinicId: c.clinicId, schedule: c.schedule })),
           })
+        }
+        // Sugerencias de clínica (texto libre del médico): solo reemplaza las
+        // PENDING; las ya normalizadas/descartadas por el admin se conservan.
+        if (clinicSuggestions) {
+          await tx.clinicSuggestion.deleteMany({ where: { doctorId: id, status: 'PENDING' } })
+          const rows = this.normalizeSuggestionRows(clinicSuggestions).map((s) => ({ ...s, doctorId: id }))
+          if (rows.length) await tx.clinicSuggestion.createMany({ data: rows })
         }
         if (insuranceIds) {
           await tx.doctorInsurance.deleteMany({ where: { doctorId: id } })
@@ -794,6 +811,61 @@ export class DoctorsService {
     ]
     // Solo cuenta si el campo vino en el payload (undefined = "no tocar")
     return pairs.some(([incoming, current]) => incoming !== undefined && norm(incoming) !== norm(current))
+  }
+
+  /** Normaliza filas de sugerencia de clínica (texto libre del médico, 07 §14) */
+  private normalizeSuggestionRows(rows?: { rawName: string; schedule?: string }[]) {
+    return (rows ?? [])
+      .filter((s) => s.rawName?.trim())
+      .map((s) => ({ rawName: stripAllHtml(s.rawName.trim()), schedule: s.schedule?.trim() || null }))
+  }
+
+  // ─── Admin: normalización de clínicas sugeridas (07 §14) ─────────────────────
+
+  /** Asocia la clínica (existente o recién creada) al médico y cierra la sugerencia */
+  async resolveClinicSuggestion(doctorId: string, suggestionId: string, dto: ResolveClinicSuggestionDto) {
+    const suggestion = await this.prisma.clinicSuggestion.findUnique({ where: { id: suggestionId } })
+    if (!suggestion || suggestion.doctorId !== doctorId) {
+      throw new NotFoundException('Sugerencia de clínica no encontrada')
+    }
+    const clinic = await this.prisma.clinic.findUnique({ where: { id: dto.clinicId }, select: { id: true } })
+    if (!clinic) throw new NotFoundException('Clínica no encontrada')
+
+    const existing = await this.prisma.doctor.findUnique({ where: { id: doctorId }, select: { status: true } })
+    if (!existing) throw new NotFoundException('Médico no encontrado')
+    const pathsBefore =
+      existing.status === DoctorStatus.PUBLISHED ? await this.revalidation.collectDoctorPaths(doctorId) : []
+
+    await this.prisma.$transaction(async (tx) => {
+      // Asocia la clínica (si ya estaba ligada, conserva/actualiza la tanda)
+      await tx.doctorClinic.upsert({
+        where: { doctorId_clinicId: { doctorId, clinicId: dto.clinicId } },
+        create: { doctorId, clinicId: dto.clinicId, schedule: dto.schedule ?? suggestion.schedule ?? null },
+        update: dto.schedule !== undefined ? { schedule: dto.schedule } : {},
+      })
+      await tx.clinicSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: 'RESOLVED', resolvedClinicId: dto.clinicId, resolvedAt: new Date() },
+      })
+    })
+
+    if (existing.status === DoctorStatus.PUBLISHED) {
+      void this.revalidation.revalidateDoctorPaths(doctorId, pathsBefore)
+    }
+    return this.findOne(doctorId)
+  }
+
+  /** Descarta una sugerencia sin asociar clínica (texto basura / duplicado) */
+  async dismissClinicSuggestion(doctorId: string, suggestionId: string) {
+    const suggestion = await this.prisma.clinicSuggestion.findUnique({ where: { id: suggestionId } })
+    if (!suggestion || suggestion.doctorId !== doctorId) {
+      throw new NotFoundException('Sugerencia de clínica no encontrada')
+    }
+    await this.prisma.clinicSuggestion.update({
+      where: { id: suggestionId },
+      data: { status: 'DISMISSED', resolvedAt: new Date() },
+    })
+    return this.findOne(doctorId)
   }
 
   // ─── Admin: estado, plan, verificación ──────────────────────────────────────

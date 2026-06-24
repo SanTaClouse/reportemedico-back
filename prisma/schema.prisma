@@ -395,16 +395,17 @@ model Doctor {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  specialties    DoctorSpecialty[]
-  clinics        DoctorClinic[]
-  insurances     DoctorInsurance[]
-  whatsappClicks WhatsAppClick[]
-  sessions       SessionLog[]
-  emails         EmailLog[]
-  reviews        Review[]
-  articles       Article[]
-  claimTokens    ClaimToken[]
-  benefits       DoctorBenefit[]
+  specialties      DoctorSpecialty[]
+  clinics          DoctorClinic[]
+  clinicSuggestions ClinicSuggestion[] // clínicas escritas en texto libre, pendientes de normalizar (07 §14)
+  insurances       DoctorInsurance[]
+  whatsappClicks   WhatsAppClick[]
+  sessions         SessionLog[]
+  emails           EmailLog[]
+  reviews          Review[]
+  articles         Article[]
+  claimTokens      ClaimToken[]
+  benefits         DoctorBenefit[]
 
   @@index([status])
   @@index([status, createdAt]) // cola de pendientes y recordatorios de wizard
@@ -445,7 +446,8 @@ model Clinic {
   longitude Float?  // sin coords NO aparece en el mapa ni en "cerca de mí"; sí en listados por especialidad/ciudad
   phone     String?
 
-  doctors DoctorClinic[]
+  doctors             DoctorClinic[]
+  resolvedSuggestions ClinicSuggestion[] // sugerencias de médicos normalizadas hacia esta clínica
 
   @@index([cityId])
   @@index([latitude, longitude]) // Haversine de "cerca de mí" (05 §4)
@@ -481,6 +483,25 @@ model DoctorClinic {
   clinic   Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
 
   @@id([doctorId, clinicId])
+}
+
+// El médico escribe una clínica que no está en el catálogo (texto libre).
+// El admin la normaliza al revisar el perfil: la mapea a una existente o crea
+// la nueva (con coords) y la asocia — el catálogo público no se ensucia (07 §14).
+model ClinicSuggestion {
+  id               String    @id @default(uuid())
+  doctorId         String
+  doctor           Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  rawName          String // lo que escribió el médico
+  schedule         String? // tanda asociada, para no perderla al normalizar
+  status           String    @default("PENDING") // PENDING | RESOLVED | DISMISSED
+  resolvedClinicId String?
+  resolvedClinic   Clinic?   @relation(fields: [resolvedClinicId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now())
+  resolvedAt       DateTime?
+
+  @@index([doctorId])
+  @@index([status])
 }
 
 model DoctorInsurance {

@@ -3,6 +3,21 @@ import {
 } from 'class-validator'
 import { DoctorStatus, DoctorPlan, BenefitType } from '@prisma/client'
 
+/**
+ * Normaliza una sugerencia de clínica del médico (07 §14): el admin la asocia a
+ * una clínica del catálogo (existente o recién creada). El schedule pisa la tanda
+ * sugerida si el admin la ajusta.
+ */
+export class ResolveClinicSuggestionDto {
+  @IsUUID('4')
+  clinicId!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  schedule?: string
+}
+
 export class UpdateDoctorStatusDto {
   @IsEnum(DoctorStatus)
   status!: DoctorStatus

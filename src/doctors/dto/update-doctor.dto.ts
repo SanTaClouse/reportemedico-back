@@ -5,6 +5,19 @@ import {
 import { Type } from 'class-transformer'
 import { DoctorClinicInput } from './create-doctor.dto'
 
+// Clínica fuera del catálogo, escrita en texto libre por el médico (07 §14).
+export class ClinicSuggestionInput {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  rawName!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  schedule?: string
+}
+
 // El slug NO se actualiza nunca por acá (inmutable post-publicación, 04 §2).
 // Estado, plan y verificación tienen endpoints propios con sus reglas.
 export class UpdateDoctorDto {
@@ -89,6 +102,13 @@ export class UpdateDoctorDto {
   @ValidateNested({ each: true })
   @Type(() => DoctorClinicInput)
   clinics?: DoctorClinicInput[]
+
+  // Clínicas que el médico escribió en texto libre (no están en el catálogo)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ClinicSuggestionInput)
+  clinicSuggestions?: ClinicSuggestionInput[]
 
   @IsOptional()
   @IsArray()

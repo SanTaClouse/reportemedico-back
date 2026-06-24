@@ -13,6 +13,7 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto'
 import {
   UpdateDoctorStatusDto, UpdateDoctorPlanDto, UpdateDoctorVerificationDto,
   CreateDoctorBenefitDto, UpdateDoctorBenefitDto, MergeDoctorsDto,
+  ResolveClinicSuggestionDto,
 } from './dto/doctor-admin.dtos'
 
 @Controller('doctors')
@@ -229,5 +230,22 @@ export class DoctorsController {
   @UseGuards(JwtAuthGuard)
   removeBenefit(@Param('id') id: string, @Param('benefitId') benefitId: string) {
     return this.doctorsService.removeBenefit(id, benefitId)
+  }
+
+  // Normalización de clínicas sugeridas por el médico (07 §14)
+  @Post(':id/clinic-suggestions/:suggestionId/resolve')
+  @UseGuards(JwtAuthGuard)
+  resolveClinicSuggestion(
+    @Param('id') id: string,
+    @Param('suggestionId') suggestionId: string,
+    @Body() dto: ResolveClinicSuggestionDto,
+  ) {
+    return this.doctorsService.resolveClinicSuggestion(id, suggestionId, dto)
+  }
+
+  @Post(':id/clinic-suggestions/:suggestionId/dismiss')
+  @UseGuards(JwtAuthGuard)
+  dismissClinicSuggestion(@Param('id') id: string, @Param('suggestionId') suggestionId: string) {
+    return this.doctorsService.dismissClinicSuggestion(id, suggestionId)
   }
 }
