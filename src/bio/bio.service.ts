@@ -4,6 +4,7 @@ import { RevalidationService } from '../revalidation/revalidation.service'
 import { CreateBioLinkDto } from './dto/create-bio-link.dto'
 import { UpdateBioLinkDto } from './dto/update-bio-link.dto'
 import { UpdateBioPageDto } from './dto/update-bio-page.dto'
+import { BIO_DEFAULT_PAGE, BIO_DEFAULT_LINKS } from './bio.defaults'
 
 type DeviceType = 'mobile' | 'desktop'
 type DailyRow = { day: Date; count: number }
@@ -24,6 +25,7 @@ export class BioService {
    * Los enlaces NO exponen su `url`: el clic se fuerza por /r/:id (tracking + redirect).
    */
   async getPublicPage(slug = DEFAULT_SLUG) {
+    if (slug === DEFAULT_SLUG) await this.ensureDefaultPage()
     const now = new Date()
     const page = await this.prisma.bioPage.findUnique({
       where: { slug },
@@ -73,6 +75,7 @@ export class BioService {
   // ─── ADMIN: PÁGINA Y ENLACES ────────────────────────────
 
   async getAdminPage(slug = DEFAULT_SLUG) {
+    if (slug === DEFAULT_SLUG) await this.ensureDefaultPage()
     const page = await this.prisma.bioPage.findUnique({
       where: { slug },
       include: { links: { orderBy: { order: 'asc' } } },
@@ -223,6 +226,36 @@ export class BioService {
   }
 
   // ─── PRIVADOS ───────────────────────────────────────────
+
+  /**
+   * Crea la página /bio por defecto (con enlaces de arranque) si no existe.
+   * Hace que producción se auto-aprovisione tras el deploy — sin correr seeds,
+   * y sin tocar ningún otro dato. Idempotente: si la página ya existe, no hace nada.
+   */
+  private async ensureDefaultPage(): Promise<void> {
+    const existing = await this.prisma.bioPage.findUnique({
+      where: { slug: BIO_DEFAULT_PAGE.slug },
+      select: { id: true },
+    })
+    if (existing) return
+
+    try {
+      const page = await this.prisma.bioPage.upsert({
+        where: { slug: BIO_DEFAULT_PAGE.slug },
+        update: {},
+        create: BIO_DEFAULT_PAGE,
+      })
+      const count = await this.prisma.bioLink.count({ where: { pageId: page.id } })
+      if (count === 0) {
+        await this.prisma.bioLink.createMany({
+          data: BIO_DEFAULT_LINKS.map((l, i) => ({ ...l, pageId: page.id, order: i })),
+        })
+      }
+    } catch {
+      // Carrera entre dos requests creando la misma página: el slug es único,
+      // el segundo upsert/insert puede fallar — se ignora a propósito.
+    }
+  }
 
   private async findLinkOrThrow(id: string) {
     const link = await this.prisma.bioLink.findUnique({ where: { id } })
