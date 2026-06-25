@@ -12,6 +12,7 @@ import { PodcastEpisodesModule } from './podcast-episodes/podcast-episodes.modul
 import { AdminModule } from './admin/admin.module'
 import { CouncilMembersModule } from './council-members/council-members.module'
 import { AdsModule } from './ads/ads.module'
+import { BioModule } from './bio/bio.module'
 import { EmailModule } from './email/email.module'
 // V2 — Guía Médica
 import { DoctorAuthModule } from './doctor-auth/doctor-auth.module'
@@ -44,6 +45,7 @@ import { ProgrammaticContentModule } from './programmatic-content/programmatic-c
     AdminModule,
     CouncilMembersModule,
     AdsModule,
+    BioModule,
     EmailModule,
     // V2 — Guía Médica
     DoctorAuthModule,

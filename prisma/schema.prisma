@@ -646,3 +646,65 @@ model Review {
 
   @@index([doctorId])
 }
+
+// ═════════════════════════════════════════════════
+// BIO — PÁGINA "LINK IN BIO" (reportemedico.com/bio)
+// Reemplaza el Linktree de Instagram con página propia + métricas.
+// Eventos con timestamp (no contador plano) → habilita tendencia y CTR,
+// mismo patrón que WhatsAppClick.
+// ═════════════════════════════════════════════════
+
+model BioPage {
+  id        String   @id @default(uuid())
+  slug      String   @unique @default("bio") // /bio · habilita /bio/campana-x a futuro sin migración
+  title     String   @default("Reporte Médico")
+  subtitle  String? // bio corta bajo el título
+  avatarUrl String? // logo o foto (Cloudinary)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links BioLink[]
+  views BioPageView[]
+}
+
+model BioLink {
+  id        String    @id @default(uuid())
+  pageId    String
+  page      BioPage   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  label     String // "Agenda tu cita por WhatsApp"
+  url       String // destino
+  icon      String? // identificador de ícono (whatsapp, instagram, globe…)
+  isActive  Boolean   @default(true)
+  order     Int       @default(0)
+  startsAt  DateTime? // programación opcional (promos)
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  clicks BioLinkClick[]
+
+  @@index([pageId, order])
+}
+
+model BioPageView {
+  id        String   @id @default(uuid())
+  pageId    String
+  page      BioPage  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  referrer  String? // origen (instagram…) — sin PII
+  device    String? // "mobile" | "desktop"
+  createdAt DateTime @default(now())
+
+  @@index([pageId, createdAt])
+}
+
+model BioLinkClick {
+  id        String   @id @default(uuid())
+  linkId    String
+  link      BioLink  @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  referrer  String? // sin PII
+  device    String? // "mobile" | "desktop"
+  createdAt DateTime @default(now())
+
+  @@index([linkId, createdAt])
+}

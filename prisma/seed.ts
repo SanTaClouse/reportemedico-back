@@ -102,6 +102,43 @@ async function main() {
   }
   console.log(`✅ ${adSlots.length} slots publicitarios creados/verificados`)
 
+  // ─── Bio (link in bio · reportemedico.com/bio) ─────────────────────────────────
+
+  const bioPage = await prisma.bioPage.upsert({
+    where: { slug: 'bio' },
+    update: {},
+    create: {
+      slug: 'bio',
+      title: 'Reporte Médico',
+      subtitle: 'Una dosis de Información Saludable',
+    },
+  })
+
+  const bioLinks = [
+    { label: 'Lo último en salud', url: 'https://reportemedico.com/noticias', icon: 'newspaper', order: 0 },
+    { label: 'Guía Médica — encuentra tu especialista', url: 'https://reportemedico.com/guia-medica', icon: 'stethoscope', order: 1 },
+    { label: 'Escucha nuestro podcast', url: 'https://reportemedico.com/podcast', icon: 'mic', order: 2 },
+    { label: 'Síguenos en Instagram', url: 'https://instagram.com/reportemedico', icon: 'instagram', order: 3 },
+  ]
+  // Solo sembramos links si la página aún no tiene (evita duplicar en re-seeds)
+  const existingLinks = await prisma.bioLink.count({ where: { pageId: bioPage.id } })
+  if (existingLinks === 0) {
+    await prisma.bioLink.createMany({
+      data: bioLinks.map((l) => ({ ...l, pageId: bioPage.id })),
+    })
+  }
+
+  // Enlace de ventas por WhatsApp — idempotente: se asegura siempre y queda primero
+  const salesUrl = 'https://wa.me/18295583999'
+  const hasSales = await prisma.bioLink.findFirst({ where: { pageId: bioPage.id, url: salesUrl } })
+  if (!hasSales) {
+    const min = await prisma.bioLink.aggregate({ where: { pageId: bioPage.id }, _min: { order: true } })
+    await prisma.bioLink.create({
+      data: { pageId: bioPage.id, label: 'Ventas por WhatsApp', url: salesUrl, icon: 'whatsapp', order: (min._min.order ?? 0) - 1 },
+    })
+  }
+  console.log('✅ Página bio creada/verificada (enlaces + ventas WhatsApp)')
+
   // ─── Artículos ───────────────────────────────────────────────────────────────
 
   type ArticleSeed = {
