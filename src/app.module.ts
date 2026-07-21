@@ -22,6 +22,7 @@ import { RevalidationModule } from './revalidation/revalidation.module'
 import { SpecialtiesModule } from './specialties/specialties.module'
 import { ClinicsModule } from './clinics/clinics.module'
 import { InsurancesModule } from './insurances/insurances.module'
+import { LeadsModule } from './leads/leads.module'
 import { CitiesModule } from './cities/cities.module'
 import { ProgrammaticContentModule } from './programmatic-content/programmatic-content.module'
 
@@ -55,6 +56,7 @@ import { ProgrammaticContentModule } from './programmatic-content/programmatic-c
     SpecialtiesModule,
     ClinicsModule,
     InsurancesModule,
+    LeadsModule,
     CitiesModule,
     ProgrammaticContentModule,
   ],

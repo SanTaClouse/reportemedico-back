@@ -2,7 +2,7 @@ import {
   Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards,
   ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common'
-import { DoctorStatus } from '@prisma/client'
+import { DoctorStatus, DoctorPlan } from '@prisma/client'
 import { DoctorsService } from './doctors.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { DoctorAuthGuard } from '../doctor-auth/doctor-auth.guard'
@@ -146,11 +146,12 @@ export class DoctorsController {
   @UseGuards(JwtAuthGuard)
   findAll(
     @Query('status') status?: DoctorStatus,
+    @Query('plan') plan?: DoctorPlan,
     @Query('search') search?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit?: number,
   ) {
-    return this.doctorsService.findAll({ status, search, page, limit })
+    return this.doctorsService.findAll({ status, plan, search, page, limit })
   }
 
   @Get(':id')

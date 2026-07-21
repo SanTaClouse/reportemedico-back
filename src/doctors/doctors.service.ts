@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
-import { Prisma, DoctorStatus } from '@prisma/client'
+import { Prisma, DoctorStatus, DoctorPlan } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { RevalidationService } from '../revalidation/revalidation.service'
 import { EmailService } from '../email/email.service'
@@ -64,8 +64,14 @@ export class DoctorsService {
       throw new NotFoundException('Médico no encontrado')
     }
     const related = await this.findRelated(doctor)
-    // Los campos internos no salen al público
-    const { phoneInternal, planNotes, auth0Sub, email, plan, needsReverify, ...publicDoctor } = doctor
+    // Los campos internos no salen al público. `plan` SÍ sale desde 2026-07-21:
+    // el perfil muestra el sello de Miembro según el plan (planNotes sigue fuera).
+    // ⚠️ `exequatur` NUNCA se expone (instrucción del cliente, 2026-07-21): el
+    // badge ✓ dice que la matrícula fue verificada, el número no se publica.
+    // Antes viajaba en el JSON aunque no se renderizara.
+    const {
+      phoneInternal, planNotes, auth0Sub, email, needsReverify, exequatur, ...publicDoctor
+    } = doctor
     return { ...publicDoctor, related }
   }
 
@@ -97,9 +103,8 @@ export class DoctorsService {
 
   /**
    * Listado público para programáticas y página de clínica: solo PUBLISHED,
-   * orden confirmado por el cliente (05 §3): premium → verificado →
+   * orden confirmado por el cliente (05 §3): plan → verificado →
    * completitud → rotación estable con semilla diaria.
-   * El plan NO se expone en la respuesta (el plan es invisible al paciente, 04).
    */
   async findPublicList(params: { specialtySlug?: string; citySlug?: string; clinicSlug?: string }) {
     const { specialtySlug, citySlug, clinicSlug } = params
@@ -117,7 +122,7 @@ export class DoctorsService {
     const ranked = doctors
       .map((d) => ({
         doctor: d,
-        premium: d.plan === 'PREMIUM' ? 1 : 0,
+        planRank: this.planWeight(d.plan),
         verified: d.isVerified ? 1 : 0,
         completeness: [d.photoUrl, d.bio, d.phonePublic, d.insurances.length > 0, d.clinics.some((c) => c.schedule)]
           .filter(Boolean).length,
@@ -125,7 +130,7 @@ export class DoctorsService {
       }))
       .sort(
         (a, b) =>
-          b.premium - a.premium ||
+          b.planRank - a.planRank ||
           b.verified - a.verified ||
           b.completeness - a.completeness ||
           a.rotation - b.rotation,
@@ -138,7 +143,7 @@ export class DoctorsService {
    * Búsqueda pública (05 §2, §8): filtros componibles, SIEMPRE sobre PUBLISHED.
    * Con geolocalización: ordena por distancia mínima a las clínicas del médico
    * (Haversine; con catálogos de cientos de filas se resuelve en memoria sobre
-   * el set ya filtrado). Sin geo: el orden confirmado (premium → verificado →
+   * el set ya filtrado). Sin geo: el orden confirmado (plan → verificado →
    * completitud → rotación diaria).
    */
   async search(params: {
@@ -185,7 +190,7 @@ export class DoctorsService {
     const ranked = filtered
       .map((d) => ({
         doctor: d,
-        premium: d.plan === 'PREMIUM' ? 1 : 0,
+        planRank: this.planWeight(d.plan),
         verified: d.isVerified ? 1 : 0,
         completeness: [d.photoUrl, d.bio, d.phonePublic, d.insurances.length > 0, d.clinics.some((c) => c.schedule)]
           .filter(Boolean).length,
@@ -203,7 +208,7 @@ export class DoctorsService {
         // Con geo, la distancia mínima manda; el resto desempata (05 §3)
         if (useGeo && a.distanceKm !== b.distanceKm) return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
         return (
-          b.premium - a.premium ||
+          b.planRank - a.planRank ||
           b.verified - a.verified ||
           b.completeness - a.completeness ||
           a.rotation - b.rotation
@@ -287,10 +292,17 @@ export class DoctorsService {
   }
 
   /** Card pública: solo los campos que el paciente ve (sin plan ni internos) */
+  /**
+   * Card pública.
+   * ⚠️ `plan` SÍ se expone (cambio 2026-07-21): el cliente pidió que los planes
+   * pagos se distingan visualmente en cards y perfil. Antes se ocultaba a
+   * propósito ("el plan es invisible al paciente", doc 04). Es el único dato
+   * comercial del payload; el resto (planNotes, teléfonos internos) sigue fuera.
+   */
   private toPublicCard(d: {
     id: string; slug: string; title: string | null; firstName: string; lastName: string
     photoUrl: string | null; isVerified: boolean; telehealth: boolean; languages: string[]
-    phonePublic: string | null; bio: string | null
+    phonePublic: string | null; bio: string | null; plan: DoctorPlan; conditions: string[]
     specialties: { order: number; specialty: { slug: string; name: string } }[]
     clinics: { schedule: string | null; clinic: { slug: string; name: string; address: string; latitude: number | null; longitude: number | null; city: { slug: string; name: string } } }[]
     insurances: { insurance: { slug: string; name: string } }[]
@@ -303,10 +315,12 @@ export class DoctorsService {
       lastName: d.lastName,
       photoUrl: d.photoUrl,
       isVerified: d.isVerified,
+      plan: d.plan,
       telehealth: d.telehealth,
       languages: d.languages,
       phonePublic: d.phonePublic,
       excerpt: d.bio ? d.bio.slice(0, 160) : null,
+      conditions: d.conditions,
       specialties: d.specialties
         .sort((a, b) => a.order - b.order)
         .map((s) => ({ slug: s.specialty.slug, name: s.specialty.name })),
@@ -321,6 +335,17 @@ export class DoctorsService {
       })),
       insurances: d.insurances.map((i) => ({ slug: i.insurance.slug, name: i.insurance.name })),
     }
+  }
+
+  /**
+   * Peso del plan en el orden de resultados (05 §3, actualizado 2026-07-21).
+   * Antes era binario (premium sí/no); con tres planes STANDARD tiene que
+   * quedar por encima de BASIC y por debajo de PREMIUM.
+   */
+  private planWeight(plan: DoctorPlan): number {
+    if (plan === DoctorPlan.PREMIUM) return 2
+    if (plan === DoctorPlan.STANDARD) return 1
+    return 0
   }
 
   private stableHash(input: string): number {
@@ -373,10 +398,18 @@ export class DoctorsService {
 
   // ─── Admin: listado y detalle ───────────────────────────────────────────────
 
-  async findAll(params: { status?: DoctorStatus; search?: string; page?: number; limit?: number }) {
-    const { status, search, page = 1, limit = 20 } = params
+  async findAll(params: {
+    status?: DoctorStatus
+    plan?: DoctorPlan
+    search?: string
+    page?: number
+    limit?: number
+  }) {
+    const { status, plan, search, page = 1, limit = 20 } = params
     const where: Prisma.DoctorWhereInput = {
       ...(status ? { status } : {}),
+      // Filtro por plan: alimenta la vista de leads de ventas (básicos a llamar)
+      ...(plan ? { plan } : {}),
       ...(search
         ? {
             OR: [
@@ -569,7 +602,9 @@ export class DoctorsService {
    * Crea (DRAFT) o actualiza el perfil propio. El primer guardado crea el
    * registro con auth0Sub + email del token; los siguientes reusan update().
    */
-  async upsertOwn(auth0Sub: string, tokenEmail: string | undefined, dto: UpdateDoctorDto) {
+  async upsertOwn(auth0Sub: string, tokenEmail: string | undefined, dtoWithLead: UpdateDoctorDto) {
+    // leadId NO es una columna de Doctor: se saca antes de que llegue a Prisma
+    const { leadId, ...dto } = dtoWithLead
     const existing = await this.prisma.doctor.findUnique({ where: { auth0Sub }, select: { id: true } })
     if (existing) {
       // selfEdit: dispara la re-verificación si cambia la identidad estando publicado (06 §7)
@@ -585,7 +620,7 @@ export class DoctorsService {
     const slug = await this.generateSlug(dto.title, firstName, lastName)
     const suggestionRows = this.normalizeSuggestionRows(clinicSuggestions)
     try {
-      return await this.prisma.doctor.create({
+      const created = await this.prisma.doctor.create({
         data: {
           ...data,
           firstName: stripAllHtml(firstName),
@@ -609,6 +644,19 @@ export class DoctorsService {
         },
         include: this.fullInclude,
       })
+
+      // Cierra el círculo del lead: quedó atado al médico y deja de figurar
+      // como "sin convertir" en el panel de ventas. Nunca debe tumbar el alta.
+      if (leadId) {
+        await this.prisma.lead
+          .updateMany({
+            where: { id: leadId, convertedAt: null },
+            data: { doctorId: created.id, convertedAt: new Date() },
+          })
+          .catch((e) => this.logger.warn(`No se pudo vincular el lead ${leadId}: ${e.message}`))
+      }
+
+      return created
     } catch (e) {
       this.handlePrismaError(e, dto.email)
     }
@@ -1123,6 +1171,21 @@ export class DoctorsService {
     const out = { ...fields } as Record<string, unknown>
     for (const key of ['firstName', 'lastName', 'title', 'bio', 'instagram', 'planNotes', 'exequatur']) {
       if (typeof out[key] === 'string') out[key] = stripAllHtml(out[key] as string).trim()
+    }
+    // Patologías: texto libre del médico que se renderiza público. Además de
+    // limpiar HTML, se descartan vacíos y duplicados (case-insensitive).
+    if (Array.isArray(out.conditions)) {
+      const seen = new Set<string>()
+      out.conditions = (out.conditions as unknown[])
+        .filter((c): c is string => typeof c === 'string')
+        .map((c) => stripAllHtml(c).trim())
+        .filter((c) => {
+          if (!c) return false
+          const key = c.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
     }
     return out as T
   }

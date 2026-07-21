@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsEmail, IsBoolean, IsArray, IsUUID, IsEnum,
-  MinLength, MaxLength, ValidateNested,
+  MinLength, MaxLength, ValidateNested, ArrayMaxSize, IsInt, Min, Max,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 import { DoctorStatus, DoctorPlan } from '@prisma/client'
@@ -64,6 +64,14 @@ export class CreateDoctorDto {
   @MaxLength(5000)
   bio?: string
 
+  /** Patologías / procedimientos que trata — replica el campo de la card impresa */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  @ArrayMaxSize(20)
+  conditions?: string[]
+
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -78,6 +86,13 @@ export class CreateDoctorDto {
   @IsString()
   @MaxLength(50)
   exequatur?: string
+
+  /** Años de ejercicio — franja de credenciales del hero premium */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(80)
+  yearsExperience?: number
 
   @IsOptional()
   @IsBoolean()

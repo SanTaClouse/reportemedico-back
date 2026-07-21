@@ -359,12 +359,14 @@ enum DoctorStatus {
   INACTIVE // desactivado por el admin
 }
 
-// ⚠️ PENDIENTE DE CONFIRMACIÓN CON EL CLIENTE (docs/v2/00 §7): si todos los
-// médicos pagan desde el día uno, este enum se elimina y los beneficios se
-// activan por médico. No construir UI de planes hasta confirmar.
+// ✅ CONFIRMADO CON EL CLIENTE (2026-07-21): tres planes. STANDARD es el que
+// Alberto vende ("La más vendida"): entrada accesible para el médico que solo
+// quiere aparecer en la guía sin escribir artículos. Cobro manual, sin pasarela.
+// El orden de los valores define la prioridad en resultados (05 §3).
 enum DoctorPlan {
   BASIC // gratis: perfil + búsqueda + mapa
-  PREMIUM // pago (cobro manual): beneficios activos
+  STANDARD // pago: verificación, impresa+digital, video, WhatsApp, SEO, eventos
+  PREMIUM // pago: todo lo de STANDARD + artículos, foto VIP, video corporativo, podcast
 }
 
 model Doctor {
@@ -380,9 +382,11 @@ model Doctor {
   phoneOffice   String?
   instagram     String?
   bio           String?      @db.Text // contenido único SEO del perfil
+  conditions    String[]     @default([]) // patologías / procedimientos que trata — replica el campo de la card impresa. Alto valor SEO: el paciente busca "estrechez uretral", no "urología"
   photoUrl      String? // Cloudinary
   videoUrl      String? // beneficio premium (Cloudinary / YouTube)
-  exequatur     String? // matrícula RD
+  exequatur     String? // matrícula RD (= "colegiatura"; NO agregar licenseNumber, es lo mismo)
+  yearsExperience Int? // años de ejercicio — franja de credenciales del hero premium
   isVerified    Boolean      @default(false) // badge ✓, activado manualmente por admin
   needsReverify Boolean      @default(false) // el médico editó su identidad estando publicado → re-verificar (06 §7)
   languages     String[]     @default([]) // ["Español", "Inglés"]
@@ -405,6 +409,7 @@ model Doctor {
   reviews          Review[]
   articles         Article[]
   claimTokens      ClaimToken[]
+  leads            Lead[]
   benefits         DoctorBenefit[]
 
   @@index([status])
@@ -424,6 +429,7 @@ model Specialty {
   doctors           DoctorSpecialty[]
   tags              SpecialtyTag[]
   programmaticPages ProgrammaticPageContent[]
+  leads             Lead[]
 }
 
 model City {
@@ -588,6 +594,33 @@ model ClaimToken {
   createdAt DateTime  @default(now())
 
   @@index([doctorId])
+}
+
+// ─────────────────────────────────────────────────
+// LEADS DE VENTA (2026-07-21)
+// El médico deja sus datos ANTES de pasar por Auth0. La clave del modelo es
+// que el lead sobrevive al abandono: si nunca completa el registro, Alberto
+// igual tiene a quién llamar. Por eso NO se usa Doctor en estado DRAFT.
+// ─────────────────────────────────────────────────
+
+model Lead {
+  id           String     @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String
+  phone        String
+  specialtyId  String?
+  specialty    Specialty? @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+  /// Plan que estaba mirando cuando dejó los datos — contexto de venta
+  interestPlan DoctorPlan @default(BASIC)
+  /// Se llena cuando el lead termina creando su cuenta
+  doctorId     String?
+  doctor       Doctor?    @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  convertedAt  DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([createdAt])
+  @@index([convertedAt])
 }
 
 // ─────────────────────────────────────────────────
