@@ -386,7 +386,6 @@ model Doctor {
   photoUrl      String? // Cloudinary
   videoUrl      String? // beneficio premium (Cloudinary / YouTube)
   exequatur     String? // matrícula RD (= "colegiatura"; NO agregar licenseNumber, es lo mismo)
-  yearsExperience Int? // años de ejercicio — franja de credenciales del hero premium
   isVerified    Boolean      @default(false) // badge ✓, activado manualmente por admin
   needsReverify Boolean      @default(false) // el médico editó su identidad estando publicado → re-verificar (06 §7)
   languages     String[]     @default([]) // ["Español", "Inglés"]

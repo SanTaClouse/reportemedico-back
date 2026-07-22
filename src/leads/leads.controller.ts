@@ -4,7 +4,6 @@ import {
 } from '@nestjs/common'
 import { LeadsService } from './leads.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { DoctorAuthGuard } from '../doctor-auth/doctor-auth.guard'
 import { CreateLeadDto } from './dto/create-lead.dto'
 
 @Controller('leads')
@@ -19,11 +18,14 @@ export class LeadsController {
 
   /**
    * Devuelve el lead para precargar el wizard después del alta en Auth0.
-   * Va con sesión de médico: para cuando se llama, el usuario ya se autenticó,
-   * así que no hace falta exponer datos de contacto en un endpoint abierto.
+   *
+   * PÚBLICO a propósito: al volver del callback de Auth0 el access token todavía
+   * puede no estar listo, y atar esta lectura al token hacía que el prefill
+   * fallara justo en el primer registro (el médico veía el form vacío y se iba).
+   * El id es un uuid v4 no adivinable y el dato es el que el propio usuario acaba
+   * de escribir — mismo modelo que un magic link.
    */
   @Get(':id')
-  @UseGuards(DoctorAuthGuard)
   async findOne(@Param('id') id: string) {
     const lead = await this.leadsService.findOne(id)
     if (!lead) throw new NotFoundException('Lead no encontrado')

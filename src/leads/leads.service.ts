@@ -1,13 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import { EmailService } from '../email/email.service'
 import { stripAllHtml } from '../utils/sanitize.util'
 import { CreateLeadDto } from './dto/create-lead.dto'
+
+const PLAN_LABELS: Record<string, string> = {
+  BASIC: 'Básica', STANDARD: 'Estándar', PREMIUM: 'Premium',
+}
 
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name)
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private email: EmailService,
+  ) {}
 
   /**
    * Alta pública de lead. Endpoint SIN auth: entra texto de cualquiera, así que
@@ -23,10 +31,28 @@ export class LeadsService {
         specialtyId: dto.specialtyId ?? null,
         interestPlan: dto.interestPlan ?? 'BASIC',
       },
-      select: { id: true, firstName: true, lastName: true, email: true, phone: true, specialtyId: true, interestPlan: true },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true,
+        interestPlan: true,
+        specialty: { select: { name: true } },
+      },
     })
     this.logger.log(`Lead nuevo: ${lead.email} (plan ${lead.interestPlan})`)
-    return lead
+
+    // Aviso a ventas — fire-and-forget: un fallo de email NUNCA rompe el alta
+    this.email
+      .sendNewLeadToAdmin({
+        firstName: lead.firstName,
+        lastName: lead.lastName,
+        phone: lead.phone,
+        email: lead.email,
+        specialtyName: lead.specialty?.name ?? null,
+        planLabel: PLAN_LABELS[lead.interestPlan] ?? lead.interestPlan,
+      })
+      .catch((e) => this.logger.error(`No se pudo avisar el lead nuevo: ${e.message}`))
+
+    const { specialty, ...rest } = lead
+    return { ...rest, specialtyId: dto.specialtyId ?? null }
   }
 
   /** Datos del lead para precargar el wizard tras crear la cuenta */

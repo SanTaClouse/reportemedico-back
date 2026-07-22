@@ -8,6 +8,7 @@ import {
   articleRejectedTemplate,
   doctorPendingAdminTemplate,
   doctorReverifyAdminTemplate,
+  newLeadAdminTemplate,
   doctorWelcomeTemplate,
   doctorDigestTemplate,
   wizardReminderTemplate,
@@ -69,15 +70,20 @@ export class EmailService {
     }
   }
 
-  /** Envío base. Nunca lanza: loguea y devuelve false ante error (fire-and-forget seguro). */
-  private async send(to: string, subject: string, html: string): Promise<boolean> {
+  /**
+   * Envío base. Nunca lanza: loguea y devuelve false ante error (fire-and-forget seguro).
+   * `text` opcional: la alternativa en texto plano. Mandar ambas partes mejora
+   * la entrega y ayuda a que los avisos operativos caigan en Principal (no en
+   * Promociones); sin `text` el mensaje viaja solo como HTML (como antes).
+   */
+  private async send(to: string, subject: string, html: string, text?: string): Promise<boolean> {
     if (!this.transporter) {
       this.logger.debug(`[Email no-op] "${subject}" → ${to}`)
       return false
     }
     if (!to) return false
     try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html })
+      await this.transporter.sendMail({ from: this.from, to, subject, html, ...(text ? { text } : {}) })
       this.logger.log(`Email enviado: "${subject}" → ${to}`)
       return true
     } catch (e) {
@@ -126,6 +132,24 @@ export class EmailService {
     }
     const { subject, html } = doctorPendingAdminTemplate(doctorName, this.frontendUrl)
     await this.send(adminEmail, subject, html)
+  }
+
+  /** Aviso al admin de un lead nuevo, para contacto de ventas inmediato */
+  async sendNewLeadToAdmin(lead: {
+    firstName: string
+    lastName: string
+    phone: string
+    email: string
+    specialtyName?: string | null
+    planLabel: string
+  }): Promise<void> {
+    const adminEmail = this.config.get<string>('ADMIN_EMAIL')
+    if (!adminEmail) {
+      this.logger.warn('ADMIN_EMAIL sin configurar — no se avisa el nuevo lead')
+      return
+    }
+    const { subject, html, text } = newLeadAdminTemplate(lead, this.frontendUrl)
+    await this.send(adminEmail, subject, html, text)
   }
 
   // ─── Aviso al admin: médico publicado editó su identidad (06 §7) ───────────

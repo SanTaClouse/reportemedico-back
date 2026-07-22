@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsEmail, IsBoolean, IsArray, IsUUID,
-  MinLength, MaxLength, ValidateNested, ArrayMaxSize, IsInt, Min, Max,
+  MinLength, MaxLength, ValidateNested, ArrayMaxSize,
 } from 'class-validator'
 import { Type } from 'class-transformer'
 import { DoctorClinicInput } from './create-doctor.dto'
@@ -97,13 +97,6 @@ export class UpdateDoctorDto {
   @IsString()
   @MaxLength(50)
   exequatur?: string
-
-  /** Años de ejercicio — franja de credenciales del hero premium */
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(80)
-  yearsExperience?: number
 
   @IsOptional()
   @IsArray()

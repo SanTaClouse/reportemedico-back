@@ -204,6 +204,58 @@ export function doctorPendingAdminTemplate(doctorName: string, frontendUrl: stri
   }
 }
 
+// ─── Aviso al admin de un lead nuevo (para venta telefónica) ────────────────
+
+/**
+ * Aviso INTERNO de lead nuevo. A propósito NO usa `emailLayout` (tarjeta de
+ * marca + botón) ni `ctaButton`: ese formato tipo newsletter hace que Gmail lo
+ * mande a Promociones, y este aviso Alberto tiene que verlo en Principal para
+ * llamar rápido. Va como un correo simple, casi personal, con parte de texto.
+ */
+export function newLeadAdminTemplate(lead: {
+  firstName: string
+  lastName: string
+  phone: string
+  email: string
+  specialtyName?: string | null
+  planLabel: string
+}, frontendUrl: string) {
+  const url = `${frontendUrl}/admin/guia-medica/leads`
+  const name = `${lead.firstName} ${lead.lastName}`
+  const phoneDigits = lead.phone.replace(/\D/g, '')
+  const specialty = lead.specialtyName || 'No indicada'
+
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;">` +
+    `<p>Un médico dejó sus datos en la Guía Médica y todavía no completó el registro. ` +
+    `Es buen momento para contactarlo:</p>` +
+    `<p>` +
+    `<strong>Nombre:</strong> ${name}<br>` +
+    `<strong>Teléfono:</strong> <a href="tel:${phoneDigits}">${lead.phone}</a> ` +
+    `(<a href="https://wa.me/${phoneDigits}">WhatsApp</a>)<br>` +
+    `<strong>Correo:</strong> <a href="mailto:${lead.email}">${lead.email}</a><br>` +
+    `<strong>Especialidad:</strong> ${specialty}<br>` +
+    `<strong>Plan de interés:</strong> ${lead.planLabel}` +
+    `</p>` +
+    `<p>Ver todos los leads: <a href="${url}">${url}</a></p>` +
+    `</div>`
+
+  const text =
+    `Un médico dejó sus datos en la Guía Médica y no completó el registro.\n\n` +
+    `Nombre: ${name}\n` +
+    `Teléfono: ${lead.phone}\n` +
+    `Correo: ${lead.email}\n` +
+    `Especialidad: ${specialty}\n` +
+    `Plan de interés: ${lead.planLabel}\n\n` +
+    `Ver todos los leads: ${url}`
+
+  return {
+    subject: `Nuevo lead: ${name} — ${lead.phone}`,
+    html,
+    text,
+  }
+}
+
 // ─── Recordatorio de wizard incompleto (Doctor en DRAFT, 06 §4) ─────────────
 
 export function wizardReminderTemplate(doctorName: string, frontendUrl: string) {
