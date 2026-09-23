@@ -290,8 +290,8 @@ export class EmailService {
   }
 
   /** A la persona, apenas se inscribe: confirma el email y le deja la fecha en el calendario */
-  async sendEventRegistrationReceived(to: string, data: EventEmailData, files: EventEmailFiles): Promise<boolean> {
-    const { subject, html, text } = eventRegistrationReceivedTemplate(data)
+  async sendEventRegistrationReceived(to: string, data: EventEmailData, files: EventEmailFiles, opts: { updated?: boolean } = {}): Promise<boolean> {
+    const { subject, html, text } = eventRegistrationReceivedTemplate(data, opts)
     return this.send(to, subject, html, text, {
       from: this.eventsFrom,
       attachments: [this.icsAttachment(files.ics)],

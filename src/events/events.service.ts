@@ -184,7 +184,24 @@ export class EventsService {
       select: { id: true },
     })
     if (existing) {
-      await this.prisma.eventRegistration.update({ where: { id: existing.id }, data })
+      // Reinscribirse con el mismo correo actualiza los datos en vez de duplicar.
+      // Siempre sale un correo: antes no salía ninguno y la persona quedaba
+      // esperando una confirmación que nunca llegaba.
+      const updated = await this.prisma.eventRegistration.update({
+        where: { id: existing.id },
+        data,
+        include: { event: true, specialty: { select: { name: true } } },
+      })
+      this.logger.log(`[eventos] inscripción actualizada: ${updated.email} (estado ${updated.status})`)
+      if (updated.status === 'APPROVED') {
+        // Ya estaba aprobado: lo útil es tener el QR otra vez a mano
+        void this.deliverAccess(updated.id, { force: true, variant: { kind: 'resend' } })
+          .catch((e) => this.logger.error(`No se reenvió el QR: ${(e as Error).message}`))
+      } else if (updated.status === 'PENDING') {
+        void this.sendReceived(updated, { updated: true })
+          .catch((e) => this.logger.error(`No se envió "actualizada": ${(e as Error).message}`))
+      }
+      // Al rechazado no se le avisa nada (decisión del cliente)
       return ok
     }
 
@@ -207,8 +224,8 @@ export class EventsService {
     return ok
   }
 
-  private async sendReceived(reg: RegistrationWithEvent) {
-    return this.email.sendEventRegistrationReceived(reg.email, this.emailData(reg), { ics: this.ics(reg) })
+  private async sendReceived(reg: RegistrationWithEvent, opts: { updated?: boolean } = {}) {
+    return this.email.sendEventRegistrationReceived(reg.email, this.emailData(reg), { ics: this.ics(reg) }, opts)
   }
 
   private async notifyTeam(reg: RegistrationWithEvent & { specialty: { name: string } | null }) {

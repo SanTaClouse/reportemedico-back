@@ -65,13 +65,19 @@ const partsText = (parts: EventEmailPart[]) =>
 
 // ─── Recibimos tu inscripción ───────────────────────────────────────────────
 
-export function eventRegistrationReceivedTemplate(d: EventEmailData) {
+export function eventRegistrationReceivedTemplate(d: EventEmailData, opts: { updated?: boolean } = {}) {
+  // Reinscribirse con el mismo correo actualiza los datos en vez de duplicar:
+  // el correo lo dice, así nadie queda esperando una confirmación que no llega.
   const html = emailLayout(
-    h2('¡Recibimos tu inscripción!') +
+    h2(opts.updated ? 'Actualizamos tu inscripción' : '¡Recibimos tu inscripción!') +
       p(`Hola <strong>${esc(d.firstName)}</strong>,`) +
       p(
-        `Tu inscripción al <strong>${esc(d.eventName)}</strong> quedó registrada. ` +
-          'Como es un evento con cupos, nuestro equipo la revisará y te confirmaremos por este correo.',
+        opts.updated
+          ? `Ya teníamos una inscripción al <strong>${esc(d.eventName)}</strong> con este correo, así que ` +
+            'actualizamos tus datos con lo último que enviaste. No hace falta que te inscribas de nuevo: ' +
+            'nuestro equipo la revisará y te confirmaremos por este medio.'
+          : `Tu inscripción al <strong>${esc(d.eventName)}</strong> quedó registrada. ` +
+            'Como es un evento con cupos, nuestro equipo la revisará y te confirmaremos por este correo.',
       ) +
       partsBlock(d.parts) +
       p('<strong>¿Qué sigue?</strong>') +
@@ -82,15 +88,25 @@ export function eventRegistrationReceivedTemplate(d: EventEmailData) {
       ) +
       p('Te adjuntamos el archivo del evento para que lo agregues a tu calendario (Apple, Outlook).') +
       ctaButton('Ver el programa', d.eventUrl),
-    { preheader: 'Tu inscripción quedó registrada. Te confirmaremos por este medio.', frontendUrl: d.frontendUrl },
+    {
+      preheader: opts.updated
+        ? 'Ya teníamos tu inscripción: actualizamos tus datos.'
+        : 'Tu inscripción quedó registrada. Te confirmaremos por este medio.',
+      frontendUrl: d.frontendUrl,
+    },
   )
   const text =
     `Hola ${d.firstName},\n\n` +
-    `Tu inscripción al ${d.eventName} quedó registrada. Nuestro equipo la revisará y te confirmaremos por este correo.\n\n` +
+    (opts.updated
+      ? `Ya teníamos una inscripción al ${d.eventName} con este correo, así que actualizamos tus datos. No hace falta que te inscribas de nuevo.\n\n`
+      : `Tu inscripción al ${d.eventName} quedó registrada. Nuestro equipo la revisará y te confirmaremos por este correo.\n\n`) +
     `${partsText(d.parts)}\n\n` +
     'Cuando aprobemos tu inscripción, te enviaremos a este correo tu código QR de acceso.\n\n' +
     `Programa: ${d.eventUrl}`
-  return { subject: `Recibimos tu inscripción — ${d.eventName}`, html, text }
+  const subject = opts.updated
+    ? `Actualizamos tu inscripción — ${d.eventName}`
+    : `Recibimos tu inscripción — ${d.eventName}`
+  return { subject, html, text }
 }
 
 // ─── Acceso con QR: aprobación, recordatorios y reenvío ─────────────────────
