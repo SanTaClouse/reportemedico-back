@@ -82,9 +82,18 @@ export class EmailService {
         secure: port === 465, // 587 usa STARTTLS (secure:false), 465 SSL directo
         auth: { user, pass },
       })
-      this.logger.log(`EmailService configurado (SMTP ${host}:${port})`)
+      this.logger.log(`EmailService configurado (SMTP ${host}:${port}, remitente ${emailFrom})`)
     } else {
-      this.logger.warn('EmailService en modo no-op: faltan variables SMTP_* / EMAIL_FROM')
+      // Nombrar la variable que falta: sin esto, diagnosticar exige adivinar
+      const faltan = Object.entries({ SMTP_HOST: host, SMTP_USER: user, SMTP_PASS: pass, EMAIL_FROM: emailFrom })
+        .filter(([, v]) => !v)
+        .map(([k]) => k)
+      const rawPort = this.config.get<string>('SMTP_PORT')
+      if (!rawPort) faltan.push('SMTP_PORT')
+      else if (!port) faltan.push(`SMTP_PORT (el valor "${rawPort}" no es un número)`)
+      this.logger.warn(
+        `EmailService en modo no-op: no se envía ningún correo. Falta configurar: ${faltan.join(', ')}`,
+      )
     }
   }
 
