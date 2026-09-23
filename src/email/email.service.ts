@@ -20,9 +20,9 @@ import {
 import {
   eventRegistrationReceivedTemplate,
   eventRegistrationTeamTemplate,
-  eventApprovedTemplate,
   eventAccessTemplate,
   EVENT_QR_CID,
+  type AccessVariant,
   type EventEmailData,
   type EventTeamEmailData,
 } from './event.templates'
@@ -310,17 +310,14 @@ export class EmailService {
   }
 
   /** Inscripción aprobada, antes de la fecha de envío del QR */
-  async sendEventApproved(to: string, data: EventEmailData, files: EventEmailFiles): Promise<boolean> {
-    const { subject, html, text } = eventApprovedTemplate(data)
-    return this.send(to, subject, html, text, {
-      from: this.eventsFrom,
-      attachments: [this.icsAttachment(files.ics)],
-    })
-  }
-
   /** Email con el QR de acceso. El QR va embebido por CID (Gmail bloquea las imágenes data:). */
-  async sendEventAccess(to: string, data: EventEmailData & { entryUrl: string }, files: EventEmailFiles): Promise<boolean> {
-    const { subject, html, text } = eventAccessTemplate(data)
+  async sendEventAccess(
+    to: string,
+    data: EventEmailData & { entryUrl: string },
+    files: EventEmailFiles,
+    variant?: AccessVariant,
+  ): Promise<boolean> {
+    const { subject, html, text } = eventAccessTemplate(data, variant)
     return this.send(to, subject, html, text, {
       from: this.eventsFrom,
       attachments: [

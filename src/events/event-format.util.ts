@@ -127,7 +127,7 @@ export function buildIcs(event: EventTimes, parts: EventPart[], eventUrl: string
       `DTEND:${icsDate(info.endsAt)}`,
       `SUMMARY:${icsText(`${info.title} — ${event.name}`)}`,
       `LOCATION:${icsText(location)}`,
-      `DESCRIPTION:${icsText(`Programa y detalles: ${eventUrl}\nEl día anterior recibirás tu código QR de acceso por email.`)}`,
+      `DESCRIPTION:${icsText(`Programa y detalles: ${eventUrl}\nTu código QR de acceso llega por email al aprobarse la inscripción.`)}`,
       `URL:${eventUrl}`,
       'BEGIN:VALARM',
       'ACTION:DISPLAY',
@@ -150,3 +150,25 @@ export function buildIcs(event: EventTimes, parts: EventPart[], eventUrl: string
 
 /** Vive en utils/ porque también lo usan los emails de leads (V2) */
 export { waNumber } from '../utils/phone.util'
+
+/*
+ * Recordatorios: la cuenta de "días antes" se hace por día de calendario en
+ * hora de RD, no por diferencia de 24 horas. Si el evento es el 26 a las 8 a.m.,
+ * el día 25 a cualquier hora falta 1 día, no 0.
+ */
+const rdDay = new Intl.DateTimeFormat('en-CA', {
+  timeZone: EVENT_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+})
+
+export function daysUntilEvent(eventStart: Date, now: Date = new Date()): number {
+  const diff = Date.parse(rdDay.format(eventStart)) - Date.parse(rdDay.format(now))
+  return Math.round(diff / 86_400_000)
+}
+
+/** Franja en la que se permiten envíos masivos: nadie quiere el recordatorio a las 3 a.m. */
+export function isSendingHour(now: Date = new Date(), from = 9, to = 21): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: EVENT_TZ, hour: 'numeric', hour12: false }).format(now),
+  )
+  return hour >= from && hour < to
+}

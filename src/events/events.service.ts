@@ -7,8 +7,8 @@ import * as QRCode from 'qrcode'
 import { PrismaService } from '../prisma/prisma.service'
 import { EmailService } from '../email/email.service'
 import {
-  eventRegistrationReceivedTemplate, eventApprovedTemplate, eventAccessTemplate, EVENT_QR_CID,
-  type EventEmailData,
+  eventRegistrationReceivedTemplate, eventAccessTemplate, EVENT_QR_CID,
+  type AccessVariant, type EventEmailData,
 } from '../email/event.templates'
 import { stripAllHtml } from '../utils/sanitize.util'
 import { RegisterEventDto } from './dto/register-event.dto'
@@ -16,7 +16,8 @@ import {
   CheckInDto, CreateTestRegistrationDto, SetRegistrationStatusDto, UpdateEventDto, type TestEmailType,
 } from './dto/admin-event.dto'
 import {
-  SECTOR_LABELS, attendanceLabel, buildIcs, formatWhen, googleCalendarUrl, partInfo, partsOf, waNumber,
+  SECTOR_LABELS, attendanceLabel, buildIcs, daysUntilEvent, formatWhen, googleCalendarUrl, isSendingHour,
+  partInfo, partsOf, waNumber,
 } from './event-format.util'
 
 type RegistrationWithEvent = EventRegistration & { event: Event }
@@ -39,6 +40,7 @@ export class EventsService {
   private readonly logger = new Logger(EventsService.name)
   private readonly frontendUrl: string
   private sendingQr = false
+  private sendingReminders = false
 
   constructor(
     private prisma: PrismaService,
@@ -387,19 +389,15 @@ export class EventsService {
     return { updated: regs.length, notifying }
   }
 
-  /** Antes de la fecha del QR: email "aprobada". Después: directamente el QR. */
+  /**
+   * Al aprobar sale un solo email: "tu lugar está confirmado" con el QR
+   * adentro (decisión del cliente, 2026-09-23). El QR se repite después en
+   * cada recordatorio, así que nadie tiene que buscarlo en la puerta.
+   */
   private async notifyApproved(ids: string[]) {
     for (const id of ids) {
       try {
-        const reg = await this.prisma.eventRegistration.findUnique({ where: { id }, include: { event: true } })
-        if (!reg || reg.status !== 'APPROVED') continue
-        if (reg.event.qrSendAt <= new Date()) {
-          await this.deliverAccess(id)
-          continue
-        }
-        if (!(await this.claim(id, 'approvalEmailSentAt'))) continue
-        const sent = await this.email.sendEventApproved(reg.email, this.emailData(reg), { ics: this.ics(reg) })
-        if (!sent && this.email.isConfigured) await this.release(id, 'approvalEmailSentAt')
+        await this.deliverAccess(id, { variant: { kind: 'approved' } })
       } catch (e) {
         this.logger.error(`[eventos] fallo al avisar aprobación ${id}: ${(e as Error).message}`)
       }
@@ -410,7 +408,7 @@ export class EventsService {
    * Manda el email con el QR. Sin `force` sale una sola vez (cron y
    * aprobaciones tardías); con `force` es un reenvío manual del admin.
    */
-  async deliverAccess(id: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  async deliverAccess(id: string, opts: { force?: boolean; variant?: AccessVariant } = {}): Promise<boolean> {
     const reg = await this.prisma.eventRegistration.findUnique({ where: { id }, include: { event: true } })
     if (!reg || reg.status !== 'APPROVED') return false
     const token = await this.ensureToken(reg)
@@ -421,6 +419,7 @@ export class EventsService {
       reg.email,
       { ...this.emailData(reg), entryUrl },
       { ics: this.ics(reg), qrPng: await this.qrPng(entryUrl) },
+      opts.variant,
     )
     if (sent && opts.force) {
       await this.prisma.eventRegistration.update({ where: { id }, data: { qrEmailSentAt: new Date() } })
@@ -477,6 +476,60 @@ export class EventsService {
     }
   }
 
+  /**
+   * Cron: recordatorio con el QR en los días configurados en el evento
+   * (`reminderDays`, por ejemplo [7, 1] = una semana antes y el día anterior).
+   *
+   * `remindersSent` guarda los días ya enviados a cada inscripto, así que un
+   * reinicio o una segunda vuelta del cron no repite el correo. Solo sale en
+   * horario razonable: a las 3 a.m. nadie quiere un recordatorio.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async sendDueReminders() {
+    if (this.sendingReminders) return
+    this.sendingReminders = true
+    try {
+      const now = new Date()
+      if (!isSendingHour(now)) return
+      const events = await this.prisma.event.findMany({
+        where: { eveningEndsAt: { gt: now } },
+        select: { id: true, slug: true, dayStartsAt: true, reminderDays: true },
+      })
+      for (const ev of events) {
+        const daysLeft = daysUntilEvent(ev.dayStartsAt, now)
+        if (!ev.reminderDays.includes(daysLeft)) continue
+        const pending = await this.prisma.eventRegistration.findMany({
+          where: {
+            eventId: ev.id,
+            status: 'APPROVED',
+            isTest: false,
+            NOT: { remindersSent: { has: daysLeft } },
+          },
+          select: { id: true },
+          take: 1000,
+        })
+        if (!pending.length) continue
+        this.logger.log(`[eventos] recordatorio de ${ev.slug} (faltan ${daysLeft} días) a ${pending.length} aprobados`)
+        for (const r of pending) {
+          const sent = await this.deliverAccess(r.id, { force: true, variant: { kind: 'reminder', daysLeft } })
+            .catch((e) => {
+              this.logger.error(`recordatorio ${r.id}: ${(e as Error).message}`)
+              return false
+            })
+          // Sin SMTP (dev local) igual se marca, para no reintentar en bucle
+          if (sent || !this.email.isConfigured) {
+            await this.prisma.eventRegistration.update({
+              where: { id: r.id },
+              data: { remindersSent: { push: daysLeft } },
+            })
+          }
+        }
+      }
+    } finally {
+      this.sendingReminders = false
+    }
+  }
+
   // ─── Admin: sección de pruebas ─────────────────────────────────────────────
 
   async createTest(eventId: string, dto: CreateTestRegistrationDto) {
@@ -524,7 +577,11 @@ export class EventsService {
     const reg = await this.testReg(eventId, regId)
     let sent = false
     if (type === 'received') sent = await this.sendReceived(reg)
-    if (type === 'approved') sent = await this.email.sendEventApproved(reg.email, this.emailData(reg), { ics: this.ics(reg) })
+    if (type === 'approved') sent = await this.deliverAccess(reg.id, { force: true, variant: { kind: 'approved' } })
+    if (type === 'reminder') {
+      const daysLeft = Math.max(0, daysUntilEvent(reg.event.dayStartsAt))
+      sent = await this.deliverAccess(reg.id, { force: true, variant: { kind: 'reminder', daysLeft } })
+    }
     if (type === 'access') sent = await this.deliverAccess(reg.id, { force: true })
     return { sent, smtp: this.email.isConfigured, to: reg.email }
   }
@@ -537,11 +594,16 @@ export class EventsService {
     const reg = await this.testReg(eventId, regId)
     const data = this.emailData(reg)
     if (type === 'received') return eventRegistrationReceivedTemplate(data).html
-    if (type === 'approved') return eventApprovedTemplate(data).html
     const token = await this.ensureToken(reg)
     const entryUrl = this.entryUrl(reg.event, token)
     const qr = await QRCode.toDataURL(entryUrl, { width: 480, margin: 2, errorCorrectionLevel: 'M' })
-    return eventAccessTemplate({ ...data, entryUrl }).html.replace(`cid:${EVENT_QR_CID}`, qr)
+    const variant: AccessVariant =
+      type === 'approved'
+        ? { kind: 'approved' }
+        : type === 'reminder'
+          ? { kind: 'reminder', daysLeft: Math.max(0, daysUntilEvent(reg.event.dayStartsAt)) }
+          : { kind: 'resend' }
+    return eventAccessTemplate({ ...data, entryUrl }, variant).html.replace(`cid:${EVENT_QR_CID}`, qr)
   }
 
   async resetTestCheckIns(eventId: string) {

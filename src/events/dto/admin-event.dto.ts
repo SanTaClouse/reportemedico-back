@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsEmail, IsEnum, IsBoolean, IsInt, IsIn, IsUUID, IsDateString,
-  MinLength, MaxLength, Min, ArrayMinSize, ArrayMaxSize, IsArray,
+  MinLength, MaxLength, Min, Max, ArrayMinSize, ArrayMaxSize, IsArray,
 } from 'class-validator'
 import { EventAttendance, EventPart, EventRegistrationStatus } from '@prisma/client'
 
@@ -51,6 +51,10 @@ export class UpdateEventDto {
 
   @IsOptional() @IsDateString()
   qrSendAt?: string
+
+  /** Días antes del evento en que sale el recordatorio con el QR */
+  @IsOptional() @IsArray() @ArrayMaxSize(6) @IsInt({ each: true }) @Min(0, { each: true }) @Max(120, { each: true })
+  reminderDays?: number[]
 }
 
 export class SetRegistrationStatusDto {
@@ -87,7 +91,7 @@ export class CreateTestRegistrationDto {
   isVip?: boolean
 }
 
-export const TEST_EMAIL_TYPES = ['received', 'approved', 'access'] as const
+export const TEST_EMAIL_TYPES = ['received', 'approved', 'reminder', 'access'] as const
 export type TestEmailType = (typeof TEST_EMAIL_TYPES)[number]
 
 export class SendTestEmailDto {

@@ -797,6 +797,8 @@ model Event {
   eveningEndsAt    DateTime
   eveningCapacity  Int?
   registrationOpen Boolean  @default(true)
+  /// Días antes del evento en que sale un recordatorio con el QR (7 = una semana antes, 1 = el día anterior)
+  reminderDays     Int[]    @default([7, 1])
   /// Cuándo sale el email con el QR a los aprobados (por defecto, el día anterior).
   /// Quien se aprueba después de este momento recibe el QR en el acto.
   qrSendAt         DateTime
@@ -833,6 +835,8 @@ model EventRegistration {
   /// Token del QR de acceso (no adivinable). Se genera al aprobar.
   accessToken         String?                 @unique
   qrEmailSentAt       DateTime?
+  /// Recordatorios ya enviados, por días de antelación: evita repetir el mismo
+  remindersSent       Int[]                   @default([])
   /// Inscripción de la sección de pruebas del admin: no cuenta en contadores ni en el CSV
   isTest              Boolean                 @default(false)
   createdAt           DateTime                @default(now())

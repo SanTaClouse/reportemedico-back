@@ -76,9 +76,9 @@ export function eventRegistrationReceivedTemplate(d: EventEmailData) {
       partsBlock(d.parts) +
       p('<strong>¿Qué sigue?</strong>') +
       p(
-        '1. Te avisaremos por este medio cuando tu inscripción sea aprobada.<br>' +
-          '2. El día antes del evento te enviaremos tu <strong>código QR de acceso</strong>.<br>' +
-          '3. El día del evento, muéstralo en la entrada.',
+        '1. Nuestro equipo revisa tu inscripción.<br>' +
+          '2. Al aprobarla, te llega a este correo tu <strong>código QR de acceso</strong>.<br>' +
+          '3. El día del evento, muéstralo en la entrada desde el celular o impreso.',
       ) +
       p('Te adjuntamos el archivo del evento para que lo agregues a tu calendario (Apple, Outlook).') +
       ctaButton('Ver el programa', d.eventUrl),
@@ -88,39 +88,74 @@ export function eventRegistrationReceivedTemplate(d: EventEmailData) {
     `Hola ${d.firstName},\n\n` +
     `Tu inscripción al ${d.eventName} quedó registrada. Nuestro equipo la revisará y te confirmaremos por este correo.\n\n` +
     `${partsText(d.parts)}\n\n` +
-    'El día antes del evento te enviaremos tu código QR de acceso.\n\n' +
+    'Cuando aprobemos tu inscripción, te enviaremos a este correo tu código QR de acceso.\n\n' +
     `Programa: ${d.eventUrl}`
   return { subject: `Recibimos tu inscripción — ${d.eventName}`, html, text }
 }
 
-// ─── Inscripción aprobada ───────────────────────────────────────────────────
+// ─── Acceso con QR: aprobación, recordatorios y reenvío ─────────────────────
 
-export function eventApprovedTemplate(d: EventEmailData) {
-  const html = emailLayout(
-    h2('¡Tu inscripción fue aprobada!') +
-      p(`Hola <strong>${esc(d.firstName)}</strong>, nos alegra confirmarte tu lugar en el <strong>${esc(d.eventName)}</strong>.`) +
-      partsBlock(d.parts) +
-      p(
-        '<strong>Importante:</strong> el día antes del evento te enviaremos a este correo tu ' +
-          '<strong>código QR de acceso</strong>. Tendrás que mostrarlo en la entrada, desde el celular o impreso.',
-      ) +
-      ctaButton('Ver el programa', d.eventUrl),
-    { preheader: 'Tu lugar está confirmado. El día antes te llega tu QR de acceso.', frontendUrl: d.frontendUrl },
-  )
-  const text =
-    `Hola ${d.firstName}, tu inscripción al ${d.eventName} fue aprobada.\n\n` +
-    `${partsText(d.parts)}\n\n` +
-    'El día antes del evento te enviaremos a este correo tu código QR de acceso. Tendrás que mostrarlo en la entrada.\n\n' +
-    `Programa: ${d.eventUrl}`
-  return { subject: `Tu inscripción fue aprobada — ${d.eventName}`, html, text }
+/**
+ * El QR sale al aprobar (decisión del cliente, 2026-09-23) y se repite en cada
+ * recordatorio y el día anterior. Es un solo email con el mismo pase; lo que
+ * cambia es el encabezado, para que el tercero no se lea como un duplicado.
+ */
+export type AccessVariant =
+  | { kind: 'approved' }
+  | { kind: 'reminder'; daysLeft: number }
+  | { kind: 'resend' }
+
+function accessCopy(d: EventEmailData, variant: AccessVariant) {
+  if (variant.kind === 'approved') {
+    return {
+      subject: `¡Estás dentro! Tu acceso al ${d.eventName}`,
+      title: '¡Tu lugar está confirmado!',
+      intro:
+        `Hola <strong>${esc(d.firstName)}</strong>, nos alegra confirmarte tu lugar en el ` +
+        `<strong>${esc(d.eventName)}</strong>. Este es tu código QR de acceso: guárdalo, es tu entrada.`,
+      preheader: 'Tu lugar está confirmado. Adentro está tu código QR de acceso.',
+      textIntro: `Hola ${d.firstName}, tu lugar en el ${d.eventName} está confirmado. Este es tu código QR de acceso.`,
+    }
+  }
+  if (variant.kind === 'reminder') {
+    const { daysLeft } = variant
+    const falta =
+      daysLeft === 0 ? '¡Hoy es el día!' : daysLeft === 1 ? '¡Mañana nos vemos!' : `Faltan ${daysLeft} días`
+    const subject =
+      daysLeft === 0
+        ? `Hoy es el ${d.eventName} — tu código QR`
+        : daysLeft === 1
+          ? `Mañana es el ${d.eventName} — tu código QR`
+          : `Faltan ${daysLeft} días para el ${d.eventName}`
+    return {
+      subject,
+      title: falta,
+      intro:
+        `Hola <strong>${esc(d.firstName)}</strong>, te esperamos en el <strong>${esc(d.eventName)}</strong>. ` +
+        'Te dejamos otra vez tu código QR a mano, para que no tengas que buscarlo en la puerta.',
+      preheader: `${falta} Tu código QR de acceso, otra vez a mano.`,
+      textIntro: `Hola ${d.firstName}, ${falta.toLowerCase()} Te esperamos en el ${d.eventName}. Este es tu código QR.`,
+    }
+  }
+  return {
+    subject: `Tu acceso al ${d.eventName} (código QR)`,
+    title: 'Tu código QR de acceso',
+    intro:
+      `Hola <strong>${esc(d.firstName)}</strong>, este es tu pase para el ` +
+      `<strong>${esc(d.eventName)}</strong>. Muéstralo en la entrada.`,
+    preheader: 'Tu pase de entrada. Muéstralo en la puerta.',
+    textIntro: `Hola ${d.firstName}, este es tu acceso al ${d.eventName}.`,
+  }
 }
 
-// ─── Acceso con QR ──────────────────────────────────────────────────────────
-
-export function eventAccessTemplate(d: EventEmailData & { entryUrl: string }) {
+export function eventAccessTemplate(
+  d: EventEmailData & { entryUrl: string },
+  variant: AccessVariant = { kind: 'resend' },
+) {
+  const copy = accessCopy(d, variant)
   const html = emailLayout(
-    h2('Tu código QR de acceso') +
-      p(`Hola <strong>${esc(d.firstName)}</strong>, este es tu pase para el <strong>${esc(d.eventName)}</strong>. Muéstralo en la entrada.`) +
+    h2(copy.title) +
+      p(copy.intro) +
       `<div style="text-align:center;margin:8px 0 4px;">
         <img src="cid:${EVENT_QR_CID}" width="240" height="240" alt="Código QR de acceso" style="display:inline-block;width:240px;height:240px;border:8px solid #ffffff;border-radius:8px;background:#ffffff;">
         <p style="margin:8px 0 0;font-size:15px;font-weight:bold;color:${NAVY};">${esc(d.firstName)} ${esc(d.lastName)}</p>
@@ -129,14 +164,14 @@ export function eventAccessTemplate(d: EventEmailData & { entryUrl: string }) {
       p('Si no ves el código, ábrelo desde el botón. Te recomendamos guardar una captura de pantalla por si no tienes señal en el lugar.') +
       partsBlock(d.parts) +
       p('<span style="font-size:13px;color:#666;">Este código es personal: no lo compartas.</span>'),
-    { preheader: 'Tu pase de entrada. Muéstralo en la puerta.', frontendUrl: d.frontendUrl },
+    { preheader: copy.preheader, frontendUrl: d.frontendUrl },
   )
   const text =
-    `Hola ${d.firstName}, este es tu acceso al ${d.eventName}.\n\n` +
+    `${copy.textIntro}\n\n` +
     `Abre tu entrada con el código QR aquí: ${d.entryUrl}\n\n` +
     `${partsText(d.parts)}\n\n` +
     'Este código es personal: no lo compartas.'
-  return { subject: `Tu acceso al ${d.eventName} (código QR)`, html, text }
+  return { subject: copy.subject, html, text }
 }
 
 // ─── Aviso interno al equipo del evento ─────────────────────────────────────
