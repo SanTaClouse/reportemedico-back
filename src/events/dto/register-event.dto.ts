@@ -33,6 +33,12 @@ export class RegisterEventDto {
   @IsUUID()
   specialtyId?: string
 
+  /** Especialidad escrita a mano: el catálogo de la guía no las tiene todas */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  specialtyOther?: string
+
   @IsOptional()
   @IsString()
   @MaxLength(120)

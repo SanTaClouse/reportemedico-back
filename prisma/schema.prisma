@@ -817,6 +817,8 @@ model EventRegistration {
   sector              EventSector
   specialtyId         String? // solo si sector = DOCTOR
   specialty           Specialty?              @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+  /// Especialidad escrita a mano cuando no está en el catálogo de la guía ("Otra")
+  specialtyOther      String?
   institution         String?
   position            String? // cargo
   attendance          EventAttendance

@@ -161,12 +161,15 @@ export function eventRegistrationTeamTemplate(d: EventTeamEmailData) {
     (d.inGuide ? ' Es un médico de la Guía Médica.' : '') +
     `</p><p>` +
     rows.map(([k, v]) => `<strong>${k}:</strong> ${v}`).join('<br>') +
-    `</p><p>Revisar y aprobar: <a href="${d.adminUrl}">${d.adminUrl}</a></p></div>`
+    `</p><p>Revisar y aprobar: <a href="${d.adminUrl}">${d.adminUrl}</a><br>` +
+    `<span style="color:#666;font-size:13px;">Desde el panel puedes aprobar, marcar invitados VIP, ` +
+    `reenviar el código QR y exportar la lista completa.</span></p></div>`
   const text =
     `Nueva inscripción al ${d.eventName} (van ${d.totalRegistrations}).\n\n` +
     `Nombre: ${name}\nWhatsApp: ${d.phone}\nCorreo: ${d.email}\n` +
     `Sector: ${d.sectorLabel}${d.specialtyName ? ` · ${d.specialtyName}` : ''}\n` +
     `Institución: ${d.institution ?? '—'}${d.position ? ` · ${d.position}` : ''}\n` +
-    `Asiste a: ${d.attendanceLabel}\n\nRevisar y aprobar: ${d.adminUrl}`
+    `Asiste a: ${d.attendanceLabel}\n\nRevisar y aprobar: ${d.adminUrl}\n` +
+    `Desde el panel puedes aprobar, marcar invitados VIP, reenviar el código QR y exportar la lista.`
   return { subject: `Nueva inscripción: ${name} — ${d.sectorLabel}`, html, text }
 }

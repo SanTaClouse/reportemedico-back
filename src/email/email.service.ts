@@ -40,6 +40,20 @@ export interface EventEmailFiles {
  * (loguea y no envía) para que el dev local funcione sin credenciales y para
  * que un fallo de email nunca rompa la operación que lo dispara.
  */
+/** Lo que ve el servidor, sin secretos: para el diagnóstico del panel */
+export interface SmtpDiagnostics {
+  host: string | null
+  port: string | null
+  /** false = el valor de SMTP_PORT no es un número (típico: se pegó con un comentario al lado) */
+  portIsNumber: boolean
+  user: string | null
+  hasPassword: boolean
+  from: string | null
+  eventsFrom: string | null
+  notifyTo: string | null
+  frontendUrl: string
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
@@ -78,14 +92,38 @@ export class EmailService {
     return this.transporter !== null
   }
 
-  /** Verifica la conexión/credenciales SMTP sin enviar (para el endpoint de diagnóstico) */
-  async verifyConnection(): Promise<{ ok: boolean; message: string }> {
-    if (!this.transporter) return { ok: false, message: 'SMTP no configurado (faltan variables de entorno)' }
+  /**
+   * Verifica la conexión/credenciales SMTP sin enviar, y devuelve qué está
+   * viendo el servidor. Sirve para diagnosticar desde el panel sin leer logs:
+   * distingue "faltan variables" de "el proveedor rechaza o el puerto está
+   * bloqueado". Nunca devuelve la contraseña.
+   */
+  async verifyConnection(): Promise<{ ok: boolean; message: string; config: SmtpDiagnostics }> {
+    const rawPort = this.config.get<string>('SMTP_PORT')
+    const user = this.config.get<string>('SMTP_USER') ?? ''
+    const config: SmtpDiagnostics = {
+      host: this.config.get<string>('SMTP_HOST') ?? null,
+      port: rawPort ?? null,
+      portIsNumber: Number.isFinite(Number(rawPort)) && Number(rawPort) > 0,
+      user: user ? `${user.slice(0, 4)}…${user.slice(user.indexOf('@'))}` : null,
+      hasPassword: Boolean(this.config.get<string>('SMTP_PASS')),
+      from: this.config.get<string>('EMAIL_FROM') ?? null,
+      eventsFrom: this.eventsFrom || null,
+      notifyTo: this.config.get<string>('EVENTS_NOTIFY_EMAIL') ?? this.config.get<string>('ADMIN_EMAIL') ?? null,
+      frontendUrl: this.frontendUrl,
+    }
+    if (!this.transporter) {
+      return {
+        ok: false,
+        message: 'SMTP no configurado: falta alguna variable (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS o EMAIL_FROM). No se envía ningún correo.',
+        config,
+      }
+    }
     try {
       await this.transporter.verify()
-      return { ok: true, message: 'Conexión SMTP verificada correctamente' }
+      return { ok: true, message: 'Conexión SMTP verificada correctamente', config }
     } catch (e) {
-      return { ok: false, message: `Fallo de conexión SMTP: ${(e as Error).message}` }
+      return { ok: false, message: `Fallo de conexión SMTP: ${(e as Error).message}`, config }
     }
   }
 

@@ -168,6 +168,9 @@ export class EventsService {
       phone: stripAllHtml(dto.phone).trim(),
       sector: dto.sector,
       specialtyId: dto.sector === 'DOCTOR' ? dto.specialtyId ?? null : null,
+      // El texto libre solo se guarda si no eligió una del catálogo
+      specialtyOther:
+        dto.sector === 'DOCTOR' && !dto.specialtyId ? clean(dto.specialtyOther) : null,
       institution: clean(dto.institution),
       position: clean(dto.position),
       attendance: dto.attendance,
@@ -217,7 +220,7 @@ export class EventsService {
       phone: reg.phone,
       waNumber: waNumber(reg.phone),
       sectorLabel: SECTOR_LABELS[reg.sector],
-      specialtyName: reg.specialty?.name ?? null,
+      specialtyName: reg.specialty?.name ?? reg.specialtyOther ?? null,
       institution: reg.institution,
       position: reg.position,
       attendanceLabel: attendanceLabel(reg.event, reg.attendance),
@@ -333,6 +336,7 @@ export class EventsService {
         { email: { contains: q, mode: 'insensitive' } },
         { phone: { contains: q } },
         { institution: { contains: q, mode: 'insensitive' } },
+        { specialtyOther: { contains: q, mode: 'insensitive' } },
       ]
     }
     const limit = Math.min(Math.max(f.limit, 1), 5000) // 5000 = exportación CSV completa
