@@ -148,12 +148,5 @@ export function buildIcs(event: EventTimes, parts: EventPart[], eventUrl: string
   ].map(fold).join('\r\n') + '\r\n'
 }
 
-/**
- * Número para wa.me / tel: con código de país. En RD se escribe 809/829/849
- * sin el 1 delante, y wa.me sin código de país no abre el chat.
- */
-export function waNumber(phone: string): string {
-  const d = phone.replace(/\D/g, '')
-  if (d.length === 10 && /^(809|829|849)/.test(d)) return `1${d}`
-  return d
-}
+/** Vive en utils/ porque también lo usan los emails de leads (V2) */
+export { waNumber } from '../utils/phone.util'

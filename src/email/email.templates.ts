@@ -3,6 +3,8 @@
  * Inline styles (los clientes de correo no soportan <style> ni clases externas).
  */
 
+import { waNumber } from '../utils/phone.util'
+
 const NAVY = '#001450'
 const GOLD = '#F0B414'
 
@@ -222,7 +224,7 @@ export function newLeadAdminTemplate(lead: {
 }, frontendUrl: string) {
   const url = `${frontendUrl}/admin/guia-medica/leads`
   const name = `${lead.firstName} ${lead.lastName}`
-  const phoneDigits = lead.phone.replace(/\D/g, '')
+  const phoneWa = waNumber(lead.phone)
   const specialty = lead.specialtyName || 'No indicada'
 
   const html =
@@ -231,8 +233,8 @@ export function newLeadAdminTemplate(lead: {
     `Es buen momento para contactarlo:</p>` +
     `<p>` +
     `<strong>Nombre:</strong> ${name}<br>` +
-    `<strong>Teléfono:</strong> <a href="tel:${phoneDigits}">${lead.phone}</a> ` +
-    `(<a href="https://wa.me/${phoneDigits}">WhatsApp</a>)<br>` +
+    `<strong>Teléfono:</strong> <a href="tel:+${phoneWa}">${lead.phone}</a> ` +
+    `(<a href="https://wa.me/${phoneWa}">WhatsApp</a>)<br>` +
     `<strong>Correo:</strong> <a href="mailto:${lead.email}">${lead.email}</a><br>` +
     `<strong>Especialidad:</strong> ${specialty}<br>` +
     `<strong>Plan de interés:</strong> ${lead.planLabel}` +
