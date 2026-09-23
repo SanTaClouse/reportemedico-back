@@ -25,6 +25,7 @@ model User {
 
 enum Role {
   ADMIN
+  SCANNER // personal de puerta del evento: solo usa el escáner (/acceso), nada del admin
   // MODERATOR <- futuro
   // ⚠️ NO agregar DOCTOR: los médicos NO usan User (auth local con bcrypt).
   // Su identidad vive en Auth0 y se resuelve por Doctor.auth0Sub (ver docs/v2/01 §3 y 06).
@@ -370,46 +371,47 @@ enum DoctorPlan {
 }
 
 model Doctor {
-  id            String       @id @default(uuid())
-  auth0Sub      String?      @unique // sub de Auth0; null si lo creó el admin y aún no reclamó la cuenta
-  slug          String       @unique // dra-maria-perez (SEO) — inmutable post-publicación
-  firstName     String
-  lastName      String
-  title         String? // "Dr." / "Dra."
-  email         String?      @unique // opcional: el admin puede crear perfiles sin email
-  phonePublic   String? // WhatsApp público (botón CTA)
-  phoneInternal String? // solo uso interno del admin
-  phoneOffice   String?
-  instagram     String?
-  bio           String?      @db.Text // contenido único SEO del perfil
-  conditions    String[]     @default([]) // patologías / procedimientos que trata — replica el campo de la card impresa. Alto valor SEO: el paciente busca "estrechez uretral", no "urología"
-  photoUrl      String? // Cloudinary
-  videoUrl      String? // beneficio premium (Cloudinary / YouTube)
-  exequatur     String? // matrícula RD (= "colegiatura"; NO agregar licenseNumber, es lo mismo)
-  isVerified    Boolean      @default(false) // badge ✓, activado manualmente por admin
-  needsReverify Boolean      @default(false) // el médico editó su identidad estando publicado → re-verificar (06 §7)
-  languages     String[]     @default([]) // ["Español", "Inglés"]
-  telehealth    Boolean      @default(false) // modalidad teleconsulta
-  emailOptOut   Boolean      @default(false) // baja del digest de noticias; los transaccionales no se afectan
-  wizardRemindersSent Int     @default(0) // recordatorios de wizard incompleto enviados (máx 2, 06 §4)
-  status        DoctorStatus @default(DRAFT)
-  plan          DoctorPlan   @default(BASIC)
-  planNotes     String? // notas del admin sobre cobro/beneficios entregados
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id                  String       @id @default(uuid())
+  auth0Sub            String?      @unique // sub de Auth0; null si lo creó el admin y aún no reclamó la cuenta
+  slug                String       @unique // dra-maria-perez (SEO) — inmutable post-publicación
+  firstName           String
+  lastName            String
+  title               String? // "Dr." / "Dra."
+  email               String?      @unique // opcional: el admin puede crear perfiles sin email
+  phonePublic         String? // WhatsApp público (botón CTA)
+  phoneInternal       String? // solo uso interno del admin
+  phoneOffice         String?
+  instagram           String?
+  bio                 String?      @db.Text // contenido único SEO del perfil
+  conditions          String[]     @default([]) // patologías / procedimientos que trata — replica el campo de la card impresa. Alto valor SEO: el paciente busca "estrechez uretral", no "urología"
+  photoUrl            String? // Cloudinary
+  videoUrl            String? // beneficio premium (Cloudinary / YouTube)
+  exequatur           String? // matrícula RD (= "colegiatura"; NO agregar licenseNumber, es lo mismo)
+  isVerified          Boolean      @default(false) // badge ✓, activado manualmente por admin
+  needsReverify       Boolean      @default(false) // el médico editó su identidad estando publicado → re-verificar (06 §7)
+  languages           String[]     @default([]) // ["Español", "Inglés"]
+  telehealth          Boolean      @default(false) // modalidad teleconsulta
+  emailOptOut         Boolean      @default(false) // baja del digest de noticias; los transaccionales no se afectan
+  wizardRemindersSent Int          @default(0) // recordatorios de wizard incompleto enviados (máx 2, 06 §4)
+  status              DoctorStatus @default(DRAFT)
+  plan                DoctorPlan   @default(BASIC)
+  planNotes           String? // notas del admin sobre cobro/beneficios entregados
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  specialties      DoctorSpecialty[]
-  clinics          DoctorClinic[]
-  clinicSuggestions ClinicSuggestion[] // clínicas escritas en texto libre, pendientes de normalizar (07 §14)
-  insurances       DoctorInsurance[]
-  whatsappClicks   WhatsAppClick[]
-  sessions         SessionLog[]
-  emails           EmailLog[]
-  reviews          Review[]
-  articles         Article[]
-  claimTokens      ClaimToken[]
-  leads            Lead[]
-  benefits         DoctorBenefit[]
+  specialties        DoctorSpecialty[]
+  clinics            DoctorClinic[]
+  clinicSuggestions  ClinicSuggestion[] // clínicas escritas en texto libre, pendientes de normalizar (07 §14)
+  insurances         DoctorInsurance[]
+  whatsappClicks     WhatsAppClick[]
+  sessions           SessionLog[]
+  emails             EmailLog[]
+  reviews            Review[]
+  articles           Article[]
+  claimTokens        ClaimToken[]
+  leads              Lead[]
+  benefits           DoctorBenefit[]
+  eventRegistrations EventRegistration[]
 
   @@index([status])
   @@index([status, createdAt]) // cola de pendientes y recordatorios de wizard
@@ -425,10 +427,11 @@ model Specialty {
   name           String  @unique // Cardiología
   schemaOrgValue String? // enum schema.org para JSON-LD (ej: "Cardiovascular"); null si no hay match limpio
 
-  doctors           DoctorSpecialty[]
-  tags              SpecialtyTag[]
-  programmaticPages ProgrammaticPageContent[]
-  leads             Lead[]
+  doctors            DoctorSpecialty[]
+  tags               SpecialtyTag[]
+  programmaticPages  ProgrammaticPageContent[]
+  leads              Lead[]
+  eventRegistrations EventRegistration[]
 }
 
 model City {
@@ -447,8 +450,8 @@ model Clinic {
   address   String
   cityId    String
   city      City    @relation(fields: [cityId], references: [id])
-  latitude  Float?  // opcional: el admin puede crear la clínica y mapearla luego (queda en "sin ubicar")
-  longitude Float?  // sin coords NO aparece en el mapa ni en "cerca de mí"; sí en listados por especialidad/ciudad
+  latitude  Float? // opcional: el admin puede crear la clínica y mapearla luego (queda en "sin ubicar")
+  longitude Float? // sin coords NO aparece en el mapa ni en "cerca de mí"; sí en listados por especialidad/ciudad
   phone     String?
 
   doctors             DoctorClinic[]
@@ -739,4 +742,123 @@ model BioLinkClick {
   createdAt DateTime @default(now())
 
   @@index([linkId, createdAt])
+}
+
+// ─────────────────────────────────────────────────
+// EVENTOS (Foro de Salud 5.0 — docs/v2/11)
+// Evento VIP gratuito con inscripción: cualquiera se inscribe, el equipo
+// aprueba y solo los aprobados reciben el acceso. La BD guarda lo operativo
+// (fechas, cupos, inscritos); el contenido editorial vive en la página.
+// ─────────────────────────────────────────────────
+
+enum EventRegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED // decisión del cliente: al rechazado NO le llega ningún email
+}
+
+/// A qué parte del evento asiste. Cada evento tiene dos: la jornada de día y la gala de noche.
+enum EventAttendance {
+  DAY
+  EVENING
+  BOTH
+}
+
+/// Rubro del inscrito — derivado de los paneles del foro (docs/v2/11 §5)
+enum EventSector {
+  DOCTOR
+  HEALTH_PROFESSIONAL
+  CLINIC_MANAGEMENT
+  PHARMA
+  MEDTECH
+  INSURANCE
+  FINANCE
+  EDUCATION
+  PUBLIC_SECTOR
+  GUILD
+  STUDENT
+  OTHER
+}
+
+model Event {
+  id               String   @id @default(uuid())
+  slug             String   @unique // foro-salud-5 — la página pública vive en /eventos/<slug>
+  name             String
+  venueName        String
+  venueAddress     String?
+  mapsUrl          String?
+  dayTitle         String // "Jornada Científica"
+  dayStartsAt      DateTime
+  dayEndsAt        DateTime
+  dayCapacity      Int? // referencia para el contador del admin, no corta inscripciones
+  eveningTitle     String // "Gala Aniversaria"
+  eveningVenue     String? // salón dentro del hotel, si difiere del de la jornada
+  eveningStartsAt  DateTime
+  eveningEndsAt    DateTime
+  eveningCapacity  Int?
+  registrationOpen Boolean  @default(true)
+  /// Cuándo sale el email con el QR a los aprobados (por defecto, el día anterior).
+  /// Quien se aprueba después de este momento recibe el QR en el acto.
+  qrSendAt         DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  registrations EventRegistration[]
+}
+
+model EventRegistration {
+  id                  String                  @id @default(uuid())
+  eventId             String
+  event               Event                   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  firstName           String
+  lastName            String
+  email               String
+  phone               String
+  sector              EventSector
+  specialtyId         String? // solo si sector = DOCTOR
+  specialty           Specialty?              @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+  institution         String?
+  position            String? // cargo
+  attendance          EventAttendance
+  status              EventRegistrationStatus @default(PENDING)
+  isVip               Boolean                 @default(false) // destacado en la vista en vivo del día del evento
+  /// Si el email coincide con un médico de la guía — contexto para el equipo
+  doctorId            String?
+  doctor              Doctor?                 @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  reviewedAt          DateTime?
+  /// El email de aprobación sale una sola vez aunque se reapruebe
+  approvalEmailSentAt DateTime?
+  /// Token del QR de acceso (no adivinable). Se genera al aprobar.
+  accessToken         String?                 @unique
+  qrEmailSentAt       DateTime?
+  /// Inscripción de la sección de pruebas del admin: no cuenta en contadores ni en el CSV
+  isTest              Boolean                 @default(false)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  checkIns EventCheckIn[]
+
+  @@unique([eventId, email]) // reinscribirse actualiza los datos, no duplica
+  @@index([eventId, status])
+  @@index([eventId, createdAt])
+}
+
+enum EventPart {
+  DAY
+  EVENING
+}
+
+/// Ingreso registrado en la puerta — uno por persona y por parte del evento
+model EventCheckIn {
+  id             String            @id @default(uuid())
+  registrationId String
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  part           EventPart
+  method         String // "qr" | "manual"
+  scannedById    String? // User.id del que escaneó
+  scannedByName  String?
+  createdAt      DateTime          @default(now())
+
+  @@unique([registrationId, part]) // un segundo escaneo avisa "ya ingresó"
+  @@index([part, createdAt])
 }

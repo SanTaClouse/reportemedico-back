@@ -2,6 +2,7 @@ import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { AuthService } from './auth.service'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { Roles } from './decorators/roles.decorator'
 import { LoginDto } from './dto/login.dto'
 
 interface JwtRequest {
@@ -20,6 +21,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
+  @Roles('ADMIN', 'SCANNER')
   getMe(@Request() req: JwtRequest) {
     return this.authService.getMe(req.user.sub)
   }

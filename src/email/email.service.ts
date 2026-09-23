@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as nodemailer from 'nodemailer'
-import type { Transporter } from 'nodemailer'
+import type { SendMailOptions, Transporter } from 'nodemailer'
 import {
   articleReceivedTemplate,
   articleApprovedTemplate,
@@ -17,6 +17,21 @@ import {
   testTemplate,
   type DigestArticle,
 } from './email.templates'
+import {
+  eventRegistrationReceivedTemplate,
+  eventRegistrationTeamTemplate,
+  eventApprovedTemplate,
+  eventAccessTemplate,
+  EVENT_QR_CID,
+  type EventEmailData,
+  type EventTeamEmailData,
+} from './event.templates'
+
+/** Adjuntos que acompañan los emails del evento */
+export interface EventEmailFiles {
+  ics: string // .ics con las partes a las que asiste
+  qrPng?: Buffer // solo el email de acceso
+}
 
 /**
  * EmailService — envío transaccional vía Brevo (SMTP) con nodemailer.
@@ -31,6 +46,8 @@ export class EmailService {
   private transporter: Transporter | null = null
   private readonly from: string
   private readonly frontendUrl: string
+  /** Todo lo del evento sale de eventos@ (docs/v2/11 §3); si falta, cae al remitente general */
+  private readonly eventsFrom: string
 
   constructor(private config: ConfigService) {
     const host = this.config.get<string>('SMTP_HOST')
@@ -41,6 +58,8 @@ export class EmailService {
 
     this.frontendUrl = this.config.get<string>('FRONTEND_URL') ?? 'https://reportemedico.com'
     this.from = emailFrom ? `"Reporte Médico" <${emailFrom}>` : ''
+    const eventsFrom = this.config.get<string>('EVENTS_EMAIL_FROM')
+    this.eventsFrom = eventsFrom ? `"Reporte Médico · Eventos" <${eventsFrom}>` : this.from
 
     if (host && port && user && pass && emailFrom) {
       this.transporter = nodemailer.createTransport({
@@ -76,14 +95,27 @@ export class EmailService {
    * la entrega y ayuda a que los avisos operativos caigan en Principal (no en
    * Promociones); sin `text` el mensaje viaja solo como HTML (como antes).
    */
-  private async send(to: string, subject: string, html: string, text?: string): Promise<boolean> {
+  private async send(
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+    opts: { from?: string; attachments?: SendMailOptions['attachments'] } = {},
+  ): Promise<boolean> {
     if (!this.transporter) {
       this.logger.debug(`[Email no-op] "${subject}" → ${to}`)
       return false
     }
     if (!to) return false
     try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html, ...(text ? { text } : {}) })
+      await this.transporter.sendMail({
+        from: opts.from ?? this.from,
+        to,
+        subject,
+        html,
+        ...(text ? { text } : {}),
+        ...(opts.attachments ? { attachments: opts.attachments } : {}),
+      })
       this.logger.log(`Email enviado: "${subject}" → ${to}`)
       return true
     } catch (e) {
@@ -198,6 +230,59 @@ export class EmailService {
   ): Promise<boolean> {
     const { subject, html } = doctorDigestTemplate(doctorName, articles, optOutUrl, this.frontendUrl, trackToken)
     return this.send(to, subject, html)
+  }
+
+  // ─── Eventos (Foro de Salud 5.0, docs/v2/11) ───────────────────────────────
+
+  private icsAttachment(ics: string) {
+    return {
+      filename: 'evento.ics',
+      content: ics,
+      contentType: 'text/calendar; charset=utf-8; method=PUBLISH',
+    }
+  }
+
+  /** A la persona, apenas se inscribe: confirma el email y le deja la fecha en el calendario */
+  async sendEventRegistrationReceived(to: string, data: EventEmailData, files: EventEmailFiles): Promise<boolean> {
+    const { subject, html, text } = eventRegistrationReceivedTemplate(data)
+    return this.send(to, subject, html, text, {
+      from: this.eventsFrom,
+      attachments: [this.icsAttachment(files.ics)],
+    })
+  }
+
+  /** Aviso interno por cada inscripción — va a la casilla del equipo del evento */
+  async sendEventRegistrationToTeam(data: EventTeamEmailData): Promise<boolean> {
+    const to = this.config.get<string>('EVENTS_NOTIFY_EMAIL') || this.config.get<string>('ADMIN_EMAIL')
+    if (!to) {
+      this.logger.warn('EVENTS_NOTIFY_EMAIL / ADMIN_EMAIL sin configurar — no se avisa la inscripción')
+      return false
+    }
+    const { subject, html, text } = eventRegistrationTeamTemplate(data)
+    return this.send(to, subject, html, text, { from: this.eventsFrom })
+  }
+
+  /** Inscripción aprobada, antes de la fecha de envío del QR */
+  async sendEventApproved(to: string, data: EventEmailData, files: EventEmailFiles): Promise<boolean> {
+    const { subject, html, text } = eventApprovedTemplate(data)
+    return this.send(to, subject, html, text, {
+      from: this.eventsFrom,
+      attachments: [this.icsAttachment(files.ics)],
+    })
+  }
+
+  /** Email con el QR de acceso. El QR va embebido por CID (Gmail bloquea las imágenes data:). */
+  async sendEventAccess(to: string, data: EventEmailData & { entryUrl: string }, files: EventEmailFiles): Promise<boolean> {
+    const { subject, html, text } = eventAccessTemplate(data)
+    return this.send(to, subject, html, text, {
+      from: this.eventsFrom,
+      attachments: [
+        ...(files.qrPng
+          ? [{ filename: 'qr-acceso.png', content: files.qrPng, contentType: 'image/png', cid: EVENT_QR_CID }]
+          : []),
+        this.icsAttachment(files.ics),
+      ],
+    })
   }
 
   // ─── Diagnóstico (endpoint admin) ──────────────────────────────────────────

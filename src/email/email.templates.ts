@@ -55,7 +55,7 @@ export function emailLayout(bodyHtml: string, opts: LayoutOpts): string {
 }
 
 /** Botón CTA dorado */
-function ctaButton(label: string, href: string): string {
+export function ctaButton(label: string, href: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
     <tr><td style="background:${GOLD};border-radius:8px;">
       <a href="${href}" style="display:inline-block;padding:12px 28px;color:${NAVY};font-size:15px;font-weight:bold;text-decoration:none;">${label}</a>
@@ -63,9 +63,9 @@ function ctaButton(label: string, href: string): string {
   </table>`
 }
 
-const h2 = (text: string) =>
+export const h2 = (text: string) =>
   `<h1 style="margin:0 0 16px;font-size:22px;color:${NAVY};font-weight:bold;">${text}</h1>`
-const p = (text: string) =>
+export const p = (text: string) =>
   `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#333;">${text}</p>`
 
 // ─── Artículo recibido ──────────────────────────────────────────────────────

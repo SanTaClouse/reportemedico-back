@@ -25,6 +25,8 @@ import { InsurancesModule } from './insurances/insurances.module'
 import { LeadsModule } from './leads/leads.module'
 import { CitiesModule } from './cities/cities.module'
 import { ProgrammaticContentModule } from './programmatic-content/programmatic-content.module'
+// Eventos — Foro de Salud 5.0 (docs/v2/11)
+import { EventsModule } from './events/events.module'
 
 @Module({
   imports: [
@@ -59,6 +61,7 @@ import { ProgrammaticContentModule } from './programmatic-content/programmatic-c
     LeadsModule,
     CitiesModule,
     ProgrammaticContentModule,
+    EventsModule,
   ],
 })
 export class AppModule {}
